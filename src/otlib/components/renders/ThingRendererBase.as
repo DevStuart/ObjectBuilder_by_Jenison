@@ -22,7 +22,6 @@
 
 package otlib.components.renders
 {
-    import flash.display.NativeMenuItem;
     import flash.events.ContextMenuEvent;
     import flash.events.Event;
     import flash.ui.ContextMenu;
@@ -62,6 +61,9 @@ package otlib.components.renders
 
             var duplicateMenu:ContextMenuItem = new ContextMenuItem(resource.getString("strings", "duplicate"));
             duplicateMenu.data = ThingListEvent.DUPLICATE;
+
+            var recolorMenu:ContextMenuItem = new ContextMenuItem(resource.getString("strings", "recolor"));
+            recolorMenu.data = ThingListEvent.RECOLOR;
 
             var bulkEditMenu:ContextMenuItem = new ContextMenuItem(resource.getString("strings", "bulkEdit"));
             bulkEditMenu.data = ThingListEvent.BULK_EDIT;
@@ -104,7 +106,7 @@ package otlib.components.renders
 
             var menu:ContextMenu = new ContextMenu();
             menu.customItems = [
-                    replaceMenu, exportMenu, editMenu, duplicateMenu, bulkEditMenu,
+                    replaceMenu, exportMenu, editMenu, duplicateMenu, recolorMenu, bulkEditMenu,
                     copyObjectMenu, pasteObjectMenu,
                     copyPatternsMenu, pastePatternsMenu,
                     copyPropertiesMenu, pastePropertiesMenu,
@@ -148,8 +150,11 @@ package otlib.components.renders
         {
             if (owner is ThingList)
             {
-                var type:String = NativeMenuItem(event.target).data as String;
-                ThingList(owner).onContextMenuSelect(itemIndex, type);
+                var item:ContextMenuItem = event.target as ContextMenuItem;
+                if (item)
+                {
+                    ThingList(owner).onContextMenuSelect(itemIndex, item.data as String);
+                }
             }
         }
 

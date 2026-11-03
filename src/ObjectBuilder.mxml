@@ -142,6 +142,7 @@ THE SOFTWARE.
             import ob.commands.things.ReloadItemAttributesCommand;
             import ob.commands.things.UpdateThingPropertiesCommand;
             
+            import ob.components.RecolorWindow;
             import ob.components.AboutWindow;
             import ob.components.CompileAssetsWindow;
             import ob.components.CreateAssetsWindow;
@@ -254,6 +255,8 @@ THE SOFTWARE.
             private var _lookGenerator:LookGenerator;
             private var _animationWindow:AnimationEditor;
             private var _compareWindow:CompareWindow;
+            private var _recolorWindow:RecolorWindow;
+            private var _pendingRecolorThing:Boolean = false;
             private var _assetStoreWindow:AssetStore;
             private var _autosave:Boolean;
             private var _autosaveChanged:Boolean;
@@ -1662,6 +1665,12 @@ THE SOFTWARE.
                     _pendingEditThing = false;
                     editThing(thingData);
                 }
+
+                if (_pendingRecolorThing)
+                {
+                    _pendingRecolorThing = false;
+                    openRecolorWindow(thingData);
+                }
             }
             
             private function updateThingPropertiesCallback(thing:ThingType):void
@@ -2972,6 +2981,89 @@ THE SOFTWARE.
                     duplicateThings(things, currentCategory);
                 }
             }
+
+            protected function recolorThingHandler(event:Event):void
+            {
+                if (!clientLoaded)
+                    return;
+
+                var src:ThingList = (event ? (event.target as ThingList) : null) || getActiveThingList();
+                var selectedThing:ThingType = src ? src.selectedThing : null;
+                if (!selectedThing)
+                {
+                    if (thingTypeEditor && thingTypeEditor.visible && thingTypeEditor.thingData)
+                    {
+                        openRecolorWindow(thingTypeEditor.thingData);
+                    }
+                    return;
+                }
+
+                if (thingTypeEditor && thingTypeEditor.visible && thingTypeEditor.thingData &&
+                    thingTypeEditor.thingData.id == selectedThing.id && thingTypeEditor.thingData.category == selectedThing.category)
+                {
+                    openRecolorWindow(thingTypeEditor.thingData);
+                    return;
+                }
+
+                if (this.thingData && this.thingData.id == selectedThing.id && this.thingData.category == selectedThing.category)
+                {
+                    openRecolorWindow(this.thingData);
+                }
+                else
+                {
+                    _pendingRecolorThing = true;
+                    sendCommand(new GetThingCommand(selectedThing.id, selectedThing.category));
+                }
+            }
+
+            protected function recolorEditorClickHandler(event:MouseEvent):void
+            {
+                if (thingTypeEditor && thingTypeEditor.thingData)
+                {
+                    openRecolorWindow(thingTypeEditor.thingData);
+                }
+            }
+
+            private function openRecolorWindow(data:ThingData):void
+            {
+                if (!data) return;
+
+                if (!_recolorWindow || _recolorWindow.closed)
+                {
+                    _recolorWindow = new RecolorWindow();
+                    _recolorWindow.open();
+                    WindowUtil.centralizeWindowOnScreen(_recolorWindow);
+                }
+
+                _recolorWindow.thingData = data;
+                _recolorWindow.onSave = applyRecolor;
+                _recolorWindow.activate();
+            }
+
+            private function applyRecolor(recoloredData:ThingData, isNew:Boolean):void
+            {
+                if (!clientLoaded || !recoloredData)
+                    return;
+
+                if (isNew)
+                {
+                    recoloredData.thing.id = 0;
+                    sendCommand(new ImportThingsCommand(Vector.<ThingData>([recoloredData])));
+                    appendLog(StringUtil.format(resourceManager.getString("strings", "recolorCreatedLog"),
+                        resourceManager.getString("strings", recoloredData.category)));
+                }
+                else
+                {
+                    sendCommand(new UpdateThingCommand(recoloredData, true));
+                    if (thingTypeEditor && thingTypeEditor.visible && thingTypeEditor.thingData &&
+                        thingTypeEditor.thingData.id == recoloredData.id && thingTypeEditor.thingData.category == recoloredData.category)
+                    {
+                        thingTypeEditor.thingData = recoloredData;
+                    }
+                    appendLog(StringUtil.format(resourceManager.getString("strings", "recolorReplacedLog"),
+                        resourceManager.getString("strings", recoloredData.category), recoloredData.id));
+                }
+            }
             
             protected function compareThingHandler(event:Event):void
             {
@@ -3936,6 +4028,10 @@ THE SOFTWARE.
                         showSpritesPanel = !showSpritesPanel;
                         break;
             
+                    case Menu.TOOLS_RECOLOR:
+                        recolorThingHandler(null);
+                        break;
+
                     case Menu.TOOLS_FIND:
                         openFinder();
                         break;
@@ -4570,6 +4666,7 @@ THE SOFTWARE.
                                 replace="replaceThingHandler(event)"
                                 export="exportThingHandler(event)"
                                 duplicate="duplicateThingHandler(event)"
+                                recolor="recolorThingHandler(event)"
                                 bulkEdit="bulkEditHandler(event)"
                                 edit="editThingHandler(event)"
                                 compare="compareThingHandler(event)"
@@ -4616,6 +4713,7 @@ THE SOFTWARE.
                                     replace="replaceThingHandler(event)"
                                     export="exportThingHandler(event)"
                                     duplicate="duplicateThingHandler(event)"
+                                    recolor="recolorThingHandler(event)"
                                     bulkEdit="bulkEditHandler(event)"
                                     edit="editThingHandler(event)"
                                     compare="compareThingHandler(event)"
@@ -4649,6 +4747,7 @@ THE SOFTWARE.
                                 replace="replaceThingHandler(event)"
                                 export="exportThingHandler(event)"
                                 duplicate="duplicateThingHandler(event)"
+                                recolor="recolorThingHandler(event)"
                                 bulkEdit="bulkEditHandler(event)"
                                 edit="editThingHandler(event)"
                                 compare="compareThingHandler(event)"
@@ -4711,6 +4810,12 @@ THE SOFTWARE.
                             height="22"
                             icon="{Assets.DUPLICATE}"
                             click="duplicateThingHandler(event)"/>
+                        <s:Button id="recolorThingButton"
+                            toolTip="@Resource(key='recolor', bundle='strings')"
+                            width="22"
+                            height="22"
+                            icon="{Assets.RECOLOR}"
+                            click="recolorThingHandler(event)"/>
                         <s:Button id="newThingButton"
                             toolTip="@Resource(key='new', bundle='strings')"
                             width="22"
@@ -4767,6 +4872,13 @@ THE SOFTWARE.
                             paddingTop="3"
                             paddingBottom="3"/>
                     </s:layout>
+                    <s:Button id="recolorEditorButton"
+                        label="@Resource(key='recolor', bundle='strings')"
+                        fontSize="11"
+                        height="20"
+                        icon="{Assets.RECOLOR}"
+                        enabled="{thingTypeEditor.visible &amp;&amp; thingTypeEditor.thingData != null}"
+                        click="recolorEditorClickHandler(event)"/>
                     <s:Button id="confirmButton"
                         label="@Resource(key='save', bundle='strings')"
                         fontSize="11"

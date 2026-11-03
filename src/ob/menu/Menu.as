@@ -280,6 +280,12 @@ package ob.menu
             toolsBulkReplace.data = TOOLS_BULK_REPLACE;
             toolsMenu.addMenuItem(toolsBulkReplace);
 
+            // Tools > Recolor
+            var toolsRecolor:MenuItem = new MenuItem();
+            toolsRecolor.label = Resources.getString("recolor");
+            toolsRecolor.data = TOOLS_RECOLOR;
+            toolsMenu.addMenuItem(toolsRecolor);
+
             // Separator
             toolsMenu.addMenuItem(separator);
 
@@ -419,11 +425,14 @@ package ob.menu
                 // menu Tools > Bulk Replace
                 nativeMenu.items[3].submenu.items[8].enabled = m_application.clientLoaded;
 
+                // menu Tools > Recolor
+                nativeMenu.items[3].submenu.items[9].enabled = m_application.clientLoaded;
+
                 // menu Tools > Create Missing OTB Items
-                nativeMenu.items[3].submenu.items[10].enabled = m_application.otbLoaded;
+                nativeMenu.items[3].submenu.items[11].enabled = m_application.otbLoaded;
 
                 // menu Tools > Reload Item Attributes
-                nativeMenu.items[3].submenu.items[11].enabled = m_application.otbLoaded;
+                nativeMenu.items[3].submenu.items[12].enabled = m_application.otbLoaded;
             }
             else
             {
@@ -454,11 +463,14 @@ package ob.menu
                 // menu Tools > Bulk Replace
                 nativeMenu.items[2].submenu.items[8].enabled = m_application.clientLoaded;
 
+                // menu Tools > Recolor
+                nativeMenu.items[2].submenu.items[9].enabled = m_application.clientLoaded;
+
                 // menu Tools > Create Missing OTB Items
-                nativeMenu.items[2].submenu.items[10].enabled = m_application.otbLoaded;
+                nativeMenu.items[2].submenu.items[11].enabled = m_application.otbLoaded;
 
                 // menu Tools > Reload Item Attributes
-                nativeMenu.items[2].submenu.items[11].enabled = m_application.otbLoaded;
+                nativeMenu.items[2].submenu.items[12].enabled = m_application.otbLoaded;
             }
         }
 
@@ -587,6 +599,7 @@ package ob.menu
         public static const HELP_ABOUT:String = "helpAbount";
         public static const TOOLS_QUICK_SAVE:String = "toolsQuickSave";
         public static const TOOLS_BULK_REPLACE:String = "toolsBulkReplace";
+        public static const TOOLS_RECOLOR:String = "toolsRecolor";
         public static const VIEW_SHOW_OBJECTS_GRID:String = "viewShowObjectsGrid";
         public static const TOOLS_CREATE_MISSING_ITEMS:String = "toolsCreateMissingItems";
         public static const TOOLS_RELOAD_ITEM_ATTRIBUTES:String = "toolsReloadItemAttributes";

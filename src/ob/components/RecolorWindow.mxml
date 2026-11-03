@@ -1,0 +1,698 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright (c) 2014-2026 Object Builder
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+-->
+
+<s:Window xmlns:fx="http://ns.adobe.com/mxml/2009"
+    xmlns:s="library://ns.adobe.com/flex/spark"
+    xmlns:mx="library://ns.adobe.com/flex/mx"
+    xmlns:otlib="otlib.components.*"
+    width="740"
+    height="580"
+    minWidth="680"
+    minHeight="520"
+    backgroundColor="0x383838"
+    showStatusBar="false"
+    fontSize="11"
+    title="@Resource(key='recolorTitle', bundle='strings')"
+    creationComplete="creationCompleteHandler(event)"
+    close="closeHandler(event)">
+
+    <s:layout>
+        <s:VerticalLayout paddingLeft="12" paddingRight="12" paddingTop="12" paddingBottom="12" gap="10"/>
+    </s:layout>
+
+    <fx:Metadata>
+        [ResourceBundle("strings")]
+    </fx:Metadata>
+
+    <fx:Script>
+        <![CDATA[
+            import flash.display.BitmapData;
+            import flash.events.Event;
+            import flash.events.MouseEvent;
+            import flash.geom.Point;
+            import flash.geom.Rectangle;
+            import flash.ui.Mouse;
+            import flash.ui.MouseCursor;
+
+            import mx.events.ColorPickerEvent;
+            import mx.events.FlexEvent;
+
+            import otlib.animation.FrameGroup;
+            import otlib.geom.Direction;
+            import otlib.geom.Rect;
+            import otlib.sprites.SpriteData;
+            import otlib.things.FrameGroupType;
+            import otlib.things.ThingCategory;
+            import otlib.things.ThingData;
+            import otlib.utils.RecolorUtils;
+            import otlib.utils.SpriteExtent;
+
+            // --------------------------------------------------------------------------
+            // PROPERTIES
+            // --------------------------------------------------------------------------
+
+            private var _thingData:ThingData;
+            private var _baseBitmap:BitmapData;
+            private var _recoloredBitmap:BitmapData;
+
+            private var _currentGroupType:uint = FrameGroupType.DEFAULT;
+            private var _currentFrame:uint = 0;
+            private var _currentLayer:uint = 0;
+            private var _currentPatX:uint = 0;
+            private var _currentPatY:uint = 0;
+
+            [Bindable]
+            private var _sourceColor:uint = 0xFF0000;
+            [Bindable]
+            private var _targetColor:uint = 0x0088FF;
+
+            [Bindable]
+            private var _sourceHex:String = "FF0000";
+            [Bindable]
+            private var _targetHex:String = "0088FF";
+
+            [Bindable]
+            private var _previewScale:Number = 2.0;
+
+            [Bindable]
+            private var _eyedropperActive:Boolean = false;
+
+            [Bindable]
+            private var _hasDirections:Boolean = false;
+
+            [Bindable]
+            private var _hasFrames:Boolean = false;
+
+            [Bindable]
+            private var _maxFrames:uint = 1;
+
+            [Bindable]
+            private var _objectInfo:String = "";
+
+            /** Callback onSave(recoloredThingData:ThingData, isNew:Boolean) */
+            public var onSave:Function;
+
+            // --------------------------------------------------------------------------
+            // METHODS
+            // --------------------------------------------------------------------------
+
+            public function get thingData():ThingData
+            {
+                return _thingData;
+            }
+
+            public function set thingData(value:ThingData):void
+            {
+                _thingData = value;
+                if (_thingData)
+                {
+                    var isOutfit:Boolean = (_thingData.category == ThingCategory.OUTFIT);
+                    _currentPatX = isOutfit ? 2 : 1; // South
+                    _currentPatY = isOutfit ? 0 : 2;
+
+                    var fg:FrameGroup = _thingData.thing.getFrameGroup(FrameGroupType.DEFAULT);
+                    if (fg)
+                    {
+                        _hasDirections = (fg.patternX > 1 || fg.patternY > 1);
+                        _hasFrames = (fg.frames > 1);
+                        _maxFrames = fg.frames;
+                    }
+
+                    _objectInfo = resourceManager.getString("strings", _thingData.category) + " #" + _thingData.id;
+                    rebuildBaseBitmap();
+                }
+            }
+
+            private function creationCompleteHandler(event:FlexEvent):void
+            {
+                updateDirectionButtons();
+                updatePreview();
+            }
+
+            private function closeHandler(event:Event):void
+            {
+                disposeBitmaps();
+            }
+
+            private function disposeBitmaps():void
+            {
+                if (_baseBitmap)
+                {
+                    _baseBitmap.dispose();
+                    _baseBitmap = null;
+                }
+                if (_recoloredBitmap)
+                {
+                    _recoloredBitmap.dispose();
+                    _recoloredBitmap = null;
+                }
+            }
+
+            private function rebuildBaseBitmap():void
+            {
+                if (_baseBitmap)
+                {
+                    _baseBitmap.dispose();
+                    _baseBitmap = null;
+                }
+                _baseBitmap = composePreviewBitmap();
+                updatePreview();
+            }
+
+            private function composePreviewBitmap():BitmapData
+            {
+                if (!_thingData || !_thingData.thing) return null;
+
+                var frameGroup:FrameGroup = _thingData.thing.getFrameGroup(_currentGroupType);
+                if (!frameGroup)
+                    frameGroup = _thingData.thing.getFrameGroup(FrameGroupType.DEFAULT);
+                if (!frameGroup) return null;
+
+                var size:uint = SpriteExtent.DEFAULT_SIZE;
+                var fgWidth:uint = frameGroup.width;
+                var fgHeight:uint = frameGroup.height;
+
+                var totalW:uint = fgWidth * size;
+                var totalH:uint = fgHeight * size;
+
+                var f:uint = Math.min(_currentFrame, frameGroup.frames - 1);
+                var l:uint = Math.min(_currentLayer, frameGroup.layers - 1);
+                var patX:uint = _currentPatX % frameGroup.patternX;
+                var patY:uint = _currentPatY % frameGroup.patternY;
+                var z:uint = 0;
+
+                var rect32:Rectangle = new Rectangle(0, 0, size, size);
+                var pt:Point = new Point();
+
+                var composite:BitmapData = new BitmapData(totalW, totalH, true, 0x00000000);
+
+                for (var w:uint = 0; w < fgWidth; w++)
+                {
+                    for (var h:uint = 0; h < fgHeight; h++)
+                    {
+                        var index:int = frameGroup.getSpriteIndex(w, h, l, patX, patY, z, f);
+                        var spritesList:Vector.<SpriteData> = _thingData.sprites[_currentGroupType];
+                        if (!spritesList)
+                            spritesList = _thingData.sprites[FrameGroupType.DEFAULT];
+
+                        if (spritesList && index >= 0 && index < spritesList.length)
+                        {
+                            var sd:SpriteData = spritesList[index];
+                            if (sd && !sd.isEmpty())
+                            {
+                                var bmp:BitmapData = sd.getBitmap();
+                                if (bmp)
+                                {
+                                    pt.x = (fgWidth - w - 1) * size;
+                                    pt.y = (fgHeight - h - 1) * size;
+                                    composite.copyPixels(bmp, rect32, pt, null, null, true);
+                                    bmp.dispose();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return composite;
+            }
+
+            public function updatePreview():void
+            {
+                if (!_baseBitmap)
+                    _baseBitmap = composePreviewBitmap();
+
+                if (!_baseBitmap || !previewImage) return;
+
+                if (_recoloredBitmap)
+                {
+                    _recoloredBitmap.dispose();
+                    _recoloredBitmap = null;
+                }
+
+                _recoloredBitmap = RecolorUtils.recolorBitmap(
+                    _baseBitmap,
+                    enableHslCheckBox.selected,
+                    hueSlider.value,
+                    satSlider.value,
+                    lightSlider.value,
+                    colorizeCheckBox.selected,
+                    enableReplaceCheckBox.selected,
+                    _sourceColor,
+                    _targetColor,
+                    toleranceSlider.value,
+                    preserveShadingCheckBox.selected
+                );
+
+                previewImage.source = _recoloredBitmap;
+
+                // Adjust preview display dimensions based on scale
+                previewImage.width = _baseBitmap.width * _previewScale;
+                previewImage.height = _baseBitmap.height * _previewScale;
+            }
+
+            private function onPreviewMouseDown(event:MouseEvent):void
+            {
+                if (!_baseBitmap || !previewImage) return;
+
+                var px:int = int(event.localX / _previewScale);
+                var py:int = int(event.localY / _previewScale);
+
+                if (px >= 0 && px < _baseBitmap.width && py >= 0 && py < _baseBitmap.height)
+                {
+                    var p:uint = _baseBitmap.getPixel32(px, py);
+                    var alpha:uint = (p >> 24) & 0xFF;
+                    if (alpha > 0)
+                    {
+                        var rgb:uint = p & 0x00FFFFFF;
+                        if (rgb != 0x00FF00FF)
+                        {
+                            _sourceColor = rgb;
+                            _sourceHex = padHex(rgb.toString(16).toUpperCase());
+                            sourceColorPicker.selectedColor = _sourceColor;
+
+                            // Automatically activate replace mode if user picked a color
+                            enableReplaceCheckBox.selected = true;
+                            _eyedropperActive = false;
+                            updatePreview();
+                        }
+                    }
+                }
+            }
+
+            private function padHex(hex:String):String
+            {
+                while (hex.length < 6) hex = "0" + hex;
+                return hex;
+            }
+
+            private function onSourceColorChange(event:ColorPickerEvent):void
+            {
+                _sourceColor = event.color;
+                _sourceHex = padHex(_sourceColor.toString(16).toUpperCase());
+                updatePreview();
+            }
+
+            private function onTargetColorChange(event:ColorPickerEvent):void
+            {
+                _targetColor = event.color;
+                _targetHex = padHex(_targetColor.toString(16).toUpperCase());
+                updatePreview();
+            }
+
+            private function onSourceHexChange():void
+            {
+                var clean:String = sourceHexInput.text.replace(/[^0-9A-Fa-f]/g, "");
+                if (clean.length == 6)
+                {
+                    _sourceColor = parseInt(clean, 16);
+                    _sourceHex = clean.toUpperCase();
+                    sourceColorPicker.selectedColor = _sourceColor;
+                    updatePreview();
+                }
+            }
+
+            private function onTargetHexChange():void
+            {
+                var clean:String = targetHexInput.text.replace(/[^0-9A-Fa-f]/g, "");
+                if (clean.length == 6)
+                {
+                    _targetColor = parseInt(clean, 16);
+                    _targetHex = clean.toUpperCase();
+                    targetColorPicker.selectedColor = _targetColor;
+                    updatePreview();
+                }
+            }
+
+            private function setDirection(dir:uint):void
+            {
+                var isOutfit:Boolean = (_thingData && _thingData.category == ThingCategory.OUTFIT);
+                switch(dir)
+                {
+                    case Direction.NORTH.value:
+                        _currentPatX = isOutfit ? 0 : 1;
+                        _currentPatY = 0;
+                        break;
+                    case Direction.EAST.value:
+                        _currentPatX = isOutfit ? 1 : 2;
+                        _currentPatY = isOutfit ? 0 : 1;
+                        break;
+                    case Direction.SOUTH.value:
+                        _currentPatX = isOutfit ? 2 : 1;
+                        _currentPatY = isOutfit ? 0 : 2;
+                        break;
+                    case Direction.WEST.value:
+                        _currentPatX = isOutfit ? 3 : 0;
+                        _currentPatY = isOutfit ? 0 : 1;
+                        break;
+                }
+                updateDirectionButtons();
+                rebuildBaseBitmap();
+            }
+
+            private function updateDirectionButtons():void
+            {
+                var isOutfit:Boolean = (_thingData && _thingData.category == ThingCategory.OUTFIT);
+                btnNorth.selected = (_currentPatX == (isOutfit ? 0 : 1) && _currentPatY == 0);
+                btnEast.selected = (_currentPatX == (isOutfit ? 1 : 2) && _currentPatY == (isOutfit ? 0 : 1));
+                btnSouth.selected = (_currentPatX == (isOutfit ? 2 : 1) && _currentPatY == (isOutfit ? 0 : 2));
+                btnWest.selected = (_currentPatX == (isOutfit ? 3 : 0) && _currentPatY == (isOutfit ? 0 : 1));
+            }
+
+            private function onFrameChange():void
+            {
+                _currentFrame = frameSlider.value;
+                rebuildBaseBitmap();
+            }
+
+            private function onScaleChange(scale:Number):void
+            {
+                _previewScale = scale;
+                scale1Btn.selected = (scale == 1.0);
+                scale2Btn.selected = (scale == 2.0);
+                scale3Btn.selected = (scale == 3.0);
+                scale4Btn.selected = (scale == 4.0);
+                updatePreview();
+            }
+
+            private function toggleEyedropper():void
+            {
+                _eyedropperActive = !_eyedropperActive;
+            }
+
+            private function resetAll():void
+            {
+                enableHslCheckBox.selected = true;
+                hueSlider.value = 0;
+                satSlider.value = 0;
+                lightSlider.value = 0;
+                colorizeCheckBox.selected = false;
+
+                enableReplaceCheckBox.selected = false;
+                _sourceColor = 0xFF0000;
+                _targetColor = 0x0088FF;
+                _sourceHex = "FF0000";
+                _targetHex = "0088FF";
+                sourceColorPicker.selectedColor = _sourceColor;
+                targetColorPicker.selectedColor = _targetColor;
+                toleranceSlider.value = 15;
+                preserveShadingCheckBox.selected = true;
+
+                updatePreview();
+            }
+
+            private function getRecoloredThingData():ThingData
+            {
+                return RecolorUtils.recolorThingData(
+                    _thingData,
+                    enableHslCheckBox.selected,
+                    hueSlider.value,
+                    satSlider.value,
+                    lightSlider.value,
+                    colorizeCheckBox.selected,
+                    enableReplaceCheckBox.selected,
+                    _sourceColor,
+                    _targetColor,
+                    toleranceSlider.value,
+                    preserveShadingCheckBox.selected
+                );
+            }
+
+            private function handleReplaceCurrent():void
+            {
+                var recolored:ThingData = getRecoloredThingData();
+                if (onSave != null)
+                {
+                    onSave(recolored, false);
+                }
+                this.close();
+            }
+
+            private function handleCreateNew():void
+            {
+                var recolored:ThingData = getRecoloredThingData();
+                if (onSave != null)
+                {
+                    onSave(recolored, true);
+                }
+                this.close();
+            }
+        ]]>
+    </fx:Script>
+
+    <!-- Main Split Layout: Left Preview, Right Settings -->
+    <s:HGroup width="100%" height="100%" gap="16">
+
+        <!-- Left Column: Preview + Tools -->
+        <s:VGroup width="310" height="100%" gap="8">
+            <s:Label text="{_objectInfo}" fontWeight="bold" fontSize="13" color="0xFFFFFF"/>
+
+            <!-- Checkerboard Preview Container -->
+            <s:BorderContainer width="100%" height="280" backgroundColor="0x282828" borderColor="0x202020" borderWeight="1" cornerRadius="4">
+                <s:layout>
+                    <s:BasicLayout/>
+                </s:layout>
+
+                <!-- Checkerboard Background -->
+                <otlib:CheckerBoard width="100%" height="100%" cellSize="16"/>
+
+                <!-- Centered Preview Image -->
+                <s:Group horizontalCenter="0" verticalCenter="0">
+                    <s:Image id="previewImage"
+                        scaleMode="letterbox"
+                        smooth="false"
+                        useHandCursor="{_eyedropperActive}"
+                        buttonMode="{_eyedropperActive}"
+                        mouseDown="onPreviewMouseDown(event)"/>
+                </s:Group>
+            </s:BorderContainer>
+
+            <!-- Preview Controls: Zoom & Eyedropper -->
+            <s:HGroup width="100%" verticalAlign="middle" gap="6">
+                <s:Label text="Zoom:" color="0xCCCCCC"/>
+                <s:ToggleButton id="scale1Btn" label="1x" width="34" height="22" click="onScaleChange(1.0)"/>
+                <s:ToggleButton id="scale2Btn" label="2x" width="34" height="22" selected="true" click="onScaleChange(2.0)"/>
+                <s:ToggleButton id="scale3Btn" label="3x" width="34" height="22" click="onScaleChange(3.0)"/>
+                <s:ToggleButton id="scale4Btn" label="4x" width="34" height="22" click="onScaleChange(4.0)"/>
+
+                <s:Spacer width="100%"/>
+
+                <s:ToggleButton id="eyedropperBtn"
+                    label="@Resource(key='pickColor', bundle='strings')"
+                    selected="{_eyedropperActive}"
+                    height="22"
+                    toolTip="Clique para ativar conta-gotas e selecionar cor direto no preview"
+                    click="toggleEyedropper()"/>
+            </s:HGroup>
+
+            <!-- Direction Buttons (For Outfits / Missiles) -->
+            <s:HGroup width="100%" verticalAlign="middle" gap="6" visible="{_hasDirections}" includeInLayout="{_hasDirections}">
+                <s:Label text="Direção:" color="0xCCCCCC"/>
+                <s:ToggleButton id="btnNorth" label="N" width="32" height="22" click="setDirection(Direction.NORTH.value)"/>
+                <s:ToggleButton id="btnEast" label="E" width="32" height="22" click="setDirection(Direction.EAST.value)"/>
+                <s:ToggleButton id="btnSouth" label="S" width="32" height="22" selected="true" click="setDirection(Direction.SOUTH.value)"/>
+                <s:ToggleButton id="btnWest" label="W" width="32" height="22" click="setDirection(Direction.WEST.value)"/>
+            </s:HGroup>
+
+            <!-- Animation Frame Slider (For Animated Items / Effects) -->
+            <s:HGroup width="100%" verticalAlign="middle" gap="6" visible="{_hasFrames}" includeInLayout="{_hasFrames}">
+                <s:Label text="Frame:" color="0xCCCCCC"/>
+                <s:HSlider id="frameSlider"
+                    width="100%"
+                    minimum="0"
+                    maximum="{_maxFrames - 1}"
+                    stepSize="1"
+                    value="0"
+                    liveDragging="true"
+                    change="onFrameChange()"/>
+                <s:Label text="{frameSlider.value + 1} / {_maxFrames}" color="0xAAAAAA" width="35"/>
+            </s:HGroup>
+        </s:VGroup>
+
+        <!-- Right Column: Recolor Settings -->
+        <s:VGroup width="100%" height="100%" gap="12">
+
+            <!-- Section 1: Matiz e Saturação (HSL) -->
+            <s:BorderContainer width="100%" backgroundColor="0x2E2E2E" borderColor="0x222222" cornerRadius="4">
+                <s:layout>
+                    <s:VerticalLayout paddingLeft="10" paddingRight="10" paddingTop="8" paddingBottom="10" gap="8"/>
+                </s:layout>
+
+                <s:HGroup width="100%" verticalAlign="middle">
+                    <s:CheckBox id="enableHslCheckBox"
+                        label="@Resource(key='enableHsl', bundle='strings')"
+                        selected="true"
+                        fontWeight="bold"
+                        fontSize="12"
+                        change="updatePreview()"/>
+                    <s:Spacer width="100%"/>
+                    <s:CheckBox id="colorizeCheckBox"
+                        label="@Resource(key='colorize', bundle='strings')"
+                        selected="false"
+                        enabled="{enableHslCheckBox.selected}"
+                        change="updatePreview()"/>
+                </s:HGroup>
+
+                <!-- Hue Slider (-180 to 180) -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableHslCheckBox.selected}">
+                    <s:Label text="@Resource(key='hue', bundle='strings')" width="70" color="0xDDDDDD"/>
+                    <s:HSlider id="hueSlider"
+                        width="100%"
+                        minimum="{colorizeCheckBox.selected ? 0 : -180}"
+                        maximum="{colorizeCheckBox.selected ? 360 : 180}"
+                        stepSize="1"
+                        value="0"
+                        liveDragging="true"
+                        change="updatePreview()"/>
+                    <s:Label text="{hueSlider.value}°" width="45" textAlign="right" color="0xEEEEEE"/>
+                </s:HGroup>
+
+                <!-- Saturation Slider (-100 to 100) -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableHslCheckBox.selected}">
+                    <s:Label text="@Resource(key='saturation', bundle='strings')" width="70" color="0xDDDDDD"/>
+                    <s:HSlider id="satSlider"
+                        width="100%"
+                        minimum="{colorizeCheckBox.selected ? 0 : -100}"
+                        maximum="100"
+                        stepSize="1"
+                        value="0"
+                        liveDragging="true"
+                        change="updatePreview()"/>
+                    <s:Label text="{satSlider.value}%" width="45" textAlign="right" color="0xEEEEEE"/>
+                </s:HGroup>
+
+                <!-- Lightness Slider (-100 to 100) -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableHslCheckBox.selected}">
+                    <s:Label text="@Resource(key='lightness', bundle='strings')" width="70" color="0xDDDDDD"/>
+                    <s:HSlider id="lightSlider"
+                        width="100%"
+                        minimum="-100"
+                        maximum="100"
+                        stepSize="1"
+                        value="0"
+                        liveDragging="true"
+                        change="updatePreview()"/>
+                    <s:Label text="{lightSlider.value}%" width="45" textAlign="right" color="0xEEEEEE"/>
+                </s:HGroup>
+            </s:BorderContainer>
+
+            <!-- Section 2: Substituir Cor (Replace Color) -->
+            <s:BorderContainer width="100%" backgroundColor="0x2E2E2E" borderColor="0x222222" cornerRadius="4">
+                <s:layout>
+                    <s:VerticalLayout paddingLeft="10" paddingRight="10" paddingTop="8" paddingBottom="10" gap="8"/>
+                </s:layout>
+
+                <s:CheckBox id="enableReplaceCheckBox"
+                    label="@Resource(key='enableReplace', bundle='strings')"
+                    selected="false"
+                    fontWeight="bold"
+                    fontSize="12"
+                    change="updatePreview()"/>
+
+                <!-- Source Color Row -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableReplaceCheckBox.selected}">
+                    <s:Label text="@Resource(key='sourceColor', bundle='strings')" width="100" color="0xDDDDDD"/>
+                    <mx:ColorPicker id="sourceColorPicker"
+                        selectedColor="{_sourceColor}"
+                        change="onSourceColorChange(event)"/>
+                    <s:BorderContainer width="24" height="24" backgroundColor="{_sourceColor}" borderColor="0x111111" cornerRadius="3"/>
+                    <s:Label text="#" color="0x888888"/>
+                    <s:TextInput id="sourceHexInput"
+                        text="{_sourceHex}"
+                        width="65"
+                        maxChars="6"
+                        change="onSourceHexChange()"/>
+                </s:HGroup>
+
+                <!-- Target Color Row -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableReplaceCheckBox.selected}">
+                    <s:Label text="@Resource(key='targetColor', bundle='strings')" width="100" color="0xDDDDDD"/>
+                    <mx:ColorPicker id="targetColorPicker"
+                        selectedColor="{_targetColor}"
+                        change="onTargetColorChange(event)"/>
+                    <s:BorderContainer width="24" height="24" backgroundColor="{_targetColor}" borderColor="0x111111" cornerRadius="3"/>
+                    <s:Label text="#" color="0x888888"/>
+                    <s:TextInput id="targetHexInput"
+                        text="{_targetHex}"
+                        width="65"
+                        maxChars="6"
+                        change="onTargetHexChange()"/>
+                </s:HGroup>
+
+                <!-- Tolerance Slider (0 to 100) -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="8" enabled="{enableReplaceCheckBox.selected}">
+                    <s:Label text="@Resource(key='tolerance', bundle='strings')" width="100" color="0xDDDDDD"/>
+                    <s:HSlider id="toleranceSlider"
+                        width="100%"
+                        minimum="0"
+                        maximum="100"
+                        stepSize="1"
+                        value="15"
+                        liveDragging="true"
+                        change="updatePreview()"/>
+                    <s:Label text="{toleranceSlider.value}%" width="45" textAlign="right" color="0xEEEEEE"/>
+                </s:HGroup>
+
+                <!-- Preserve Shading Toggle -->
+                <s:HGroup width="100%" verticalAlign="middle" enabled="{enableReplaceCheckBox.selected}">
+                    <s:CheckBox id="preserveShadingCheckBox"
+                        label="@Resource(key='preserveShading', bundle='strings')"
+                        selected="true"
+                        change="updatePreview()"/>
+                </s:HGroup>
+            </s:BorderContainer>
+
+            <s:Spacer height="100%"/>
+
+            <!-- Action Buttons: Reset, Create New, Replace Current, Cancel -->
+            <s:HGroup width="100%" verticalAlign="middle" gap="8">
+                <s:Button id="resetButton"
+                    label="@Resource(key='reset', bundle='strings')"
+                    height="28"
+                    click="resetAll()"/>
+
+                <s:Spacer width="100%"/>
+
+                <s:Button id="btnCreateNew"
+                    label="@Resource(key='saveAsNew', bundle='strings')"
+                    height="28"
+                    fontWeight="bold"
+                    chromeColor="0x2E6B9E"
+                    color="0xFFFFFF"
+                    click="handleCreateNew()"/>
+
+                <s:Button id="btnReplaceCurrent"
+                    label="@Resource(key='replaceCurrent', bundle='strings')"
+                    height="28"
+                    fontWeight="bold"
+                    chromeColor="0x8C5228"
+                    color="0xFFFFFF"
+                    click="handleReplaceCurrent()"/>
+
+                <s:Button id="cancelButton"
+                    label="@Resource(key='cancel', bundle='strings')"
+                    height="28"
+                    click="this.close()"/>
+            </s:HGroup>
+        </s:VGroup>
+    </s:HGroup>
+</s:Window>

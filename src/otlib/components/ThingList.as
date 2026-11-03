@@ -48,6 +48,7 @@ package otlib.components
     [Event(name="export", type="otlib.events.ThingListEvent")]
     [Event(name="edit", type="otlib.events.ThingListEvent")]
     [Event(name="duplicate", type="otlib.events.ThingListEvent")]
+    [Event(name="recolor", type="otlib.events.ThingListEvent")]
     [Event(name="bulkEdit", type="otlib.events.ThingListEvent")]
     [Event(name="copyObject", type="otlib.events.ThingListEvent")]
     [Event(name="pasteObject", type="otlib.events.ThingListEvent")]
@@ -240,6 +241,9 @@ package otlib.components
                         case ThingListEvent.DUPLICATE:
                             event = new ThingListEvent(ThingListEvent.DUPLICATE);
                             break;
+                        case ThingListEvent.RECOLOR:
+                            event = new ThingListEvent(ThingListEvent.RECOLOR);
+                            break;
                         case ThingListEvent.BULK_EDIT:
                             event = new ThingListEvent(ThingListEvent.BULK_EDIT);
                             break;
@@ -317,34 +321,39 @@ package otlib.components
             if (this.multipleSelected)
             {
                 menu.items[2].enabled = false;  // Edit
-                menu.items[4].enabled = true;   // Bulk Edit
-                menu.items[5].enabled = false;  // Copy Object
-                menu.items[7].enabled = false;  // Copy Patterns
-                menu.items[9].enabled = false;  // Copy Properties
-                menu.items[11].enabled = false; // Copy Attributes
+                menu.items[3].enabled = false;  // Duplicate
+                menu.items[4].enabled = false;  // Recolor
+                menu.items[5].enabled = true;   // Bulk Edit
+                menu.items[6].enabled = false;  // Copy Object
+                menu.items[8].enabled = false;  // Copy Patterns
+                menu.items[10].enabled = false; // Copy Properties
+                menu.items[12].enabled = false; // Copy Attributes
 
-                menu.items[6].enabled = hasClipboardObject;      // Paste Object
-                menu.items[8].enabled = hasClipboardPatterns;    // Paste Patterns
-                menu.items[10].enabled = hasClipboardProperties; // Paste Properties
-                menu.items[12].enabled = hasClipboardAttributes && attrEnabled; // Paste Attributes
+                menu.items[7].enabled = hasClipboardObject;      // Paste Object
+                menu.items[9].enabled = hasClipboardPatterns;    // Paste Patterns
+                menu.items[11].enabled = hasClipboardProperties; // Paste Properties
+                menu.items[13].enabled = hasClipboardAttributes && attrEnabled; // Paste Attributes
 
-                menu.items[14].enabled = true;  // Compare (needs 2+)
+                menu.items[15].enabled = true;  // Compare (needs 2+)
             }
             else
             {
                 this.setSelectedIndex(index, true);
-                menu.items[4].enabled = false;  // Bulk Edit
+                menu.items[2].enabled = true;   // Edit
+                menu.items[3].enabled = true;   // Duplicate
+                menu.items[4].enabled = true;   // Recolor
+                menu.items[5].enabled = false;  // Bulk Edit
 
-                menu.items[5].enabled = true;   // Copy Object
-                menu.items[6].enabled = hasClipboardObject;      // Paste Object
-                menu.items[7].enabled = true;   // Copy Patterns
-                menu.items[8].enabled = hasClipboardPatterns;    // Paste Patterns
-                menu.items[9].enabled = true;   // Copy Properties
-                menu.items[10].enabled = hasClipboardProperties; // Paste Properties
-                menu.items[11].enabled = attrEnabled;            // Copy Attributes
-                menu.items[12].enabled = hasClipboardAttributes && attrEnabled; // Paste Attributes
+                menu.items[6].enabled = true;   // Copy Object
+                menu.items[7].enabled = hasClipboardObject;      // Paste Object
+                menu.items[8].enabled = true;   // Copy Patterns
+                menu.items[9].enabled = hasClipboardPatterns;    // Paste Patterns
+                menu.items[10].enabled = true;   // Copy Properties
+                menu.items[11].enabled = hasClipboardProperties; // Paste Properties
+                menu.items[12].enabled = attrEnabled;            // Copy Attributes
+                menu.items[13].enabled = hasClipboardAttributes && attrEnabled; // Paste Attributes
 
-                menu.items[14].enabled = false; // Compare (needs 2+)
+                menu.items[15].enabled = false; // Compare (needs 2+)
             }
         }
 

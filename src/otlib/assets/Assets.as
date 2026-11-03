@@ -51,6 +51,9 @@ package otlib.assets
         [Embed(source="/../assets/icons/duplicate.png", mimeType="image/png")]
         public static const DUPLICATE:Class;
 
+        [Embed(source="/../assets/icons/recolor.png", mimeType="image/png")]
+        public static const RECOLOR:Class;
+
         [Embed(source="/../assets/icons/new.png", mimeType="image/png")]
         public static const NEW:Class;
 
