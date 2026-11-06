@@ -23,6 +23,8 @@
 package otlib.utils
 {
     import flash.display.BitmapData;
+    import flash.geom.Point;
+    import flash.geom.Rectangle;
     import flash.utils.ByteArray;
     import flash.utils.Dictionary;
 
@@ -232,7 +234,103 @@ package otlib.utils
         }
 
         /**
+         * Performs a BFS Flood Fill / Magic Wand selection on a base bitmap, marking matching connected pixels in the mask.
+         * @param base The base sprite BitmapData
+         * @param mask The mask BitmapData to update (marking 0xFFFFFFFF)
+         * @param startX Starting X coordinate
+         * @param startY Starting Y coordinate
+         * @param tolerance Color matching tolerance percentage (0..100)
+         * @return Number of pixels marked
+         */
+        public static function magicWandSelect(base:BitmapData, mask:BitmapData, startX:int, startY:int, tolerance:Number):uint
+        {
+            if (!base || !mask || startX < 0 || startX >= base.width || startY < 0 || startY >= base.height)
+                return 0;
+
+            var targetColor:uint = base.getPixel32(startX, startY);
+            var ta:uint = (targetColor >> 24) & 0xFF;
+            if (ta == 0) return 0; // Ignore transparent background
+
+            var tr:uint = (targetColor >> 16) & 0xFF;
+            var tg:uint = (targetColor >> 8) & 0xFF;
+            var tb:uint = targetColor & 0xFF;
+
+            // Magenta transparent check
+            if (tr == 0xFF && tg == 0x00 && tb == 0xFF) return 0;
+
+            var w:int = base.width;
+            var h:int = base.height;
+
+            var queueX:Vector.<int> = new Vector.<int>();
+            var queueY:Vector.<int> = new Vector.<int>();
+            queueX.push(startX);
+            queueY.push(startY);
+
+            var visited:Vector.<Boolean> = new Vector.<Boolean>(w * h, true);
+            var startIndex:int = startY * w + startX;
+            visited[startIndex] = true;
+            mask.setPixel32(startX, startY, 0xFFFFFFFF);
+
+            var count:uint = 1;
+            var head:int = 0;
+
+            while (head < queueX.length)
+            {
+                var cx:int = queueX[head];
+                var cy:int = queueY[head];
+                head++;
+
+                var nx:int, ny:int, nIdx:int;
+
+                for (var dir:int = 0; dir < 4; dir++)
+                {
+                    if (dir == 0) { nx = cx + 1; ny = cy; }
+                    else if (dir == 1) { nx = cx - 1; ny = cy; }
+                    else if (dir == 2) { nx = cx; ny = cy + 1; }
+                    else { nx = cx; ny = cy - 1; }
+
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h)
+                    {
+                        nIdx = ny * w + nx;
+                        if (!visited[nIdx])
+                        {
+                            visited[nIdx] = true;
+                            var npColor:uint = base.getPixel32(nx, ny);
+                            var na:uint = (npColor >> 24) & 0xFF;
+
+                            if (na > 0)
+                            {
+                                var nr:uint = (npColor >> 16) & 0xFF;
+                                var ng:uint = (npColor >> 8) & 0xFF;
+                                var nb:uint = npColor & 0xFF;
+
+                                if (nr != 0xFF || ng != 0x00 || nb != 0xFF)
+                                {
+                                    var dr:Number = nr - tr;
+                                    var dg:Number = ng - tg;
+                                    var db:Number = nb - tb;
+                                    var dist:Number = Math.sqrt(dr * dr + dg * dg + db * db) / 4.41673;
+
+                                    if (dist <= tolerance)
+                                    {
+                                        mask.setPixel32(nx, ny, 0xFFFFFFFF);
+                                        queueX.push(nx);
+                                        queueY.push(ny);
+                                        count++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return count;
+        }
+
+        /**
          * Recolors a BitmapData in place or returns a recolored clone.
+         * Supports optional selection mask (recolors only pixels with mask > 0).
          */
         public static function recolorBitmap(
             bmp:BitmapData,
@@ -245,7 +343,9 @@ package otlib.utils
             srcColor:uint,
             tgtColor:uint,
             tolerance:Number,
-            preserveShading:Boolean):BitmapData
+            preserveShading:Boolean,
+            useMask:Boolean = false,
+            mask:BitmapData = null):BitmapData
         {
             if (!bmp) return null;
             var result:BitmapData = bmp.clone();
@@ -258,6 +358,14 @@ package otlib.utils
                 {
                     var p:uint = result.getPixel32(x, y);
                     if (((p >> 24) & 0xFF) == 0) continue;
+
+                    // If mask is active, skip pixels that are not marked
+                    if (useMask && mask != null)
+                    {
+                        var mVal:uint = mask.getPixel32(x, y);
+                        if ((mVal & 0x00FFFFFF) == 0)
+                            continue;
+                    }
 
                     if (useReplace)
                         p = replacePixelColor(p, srcColor, tgtColor, tolerance, preserveShading);
@@ -273,6 +381,7 @@ package otlib.utils
 
         /**
          * Recolors a SpriteData creating a new SpriteData instance with recolored pixels.
+         * Supports optional tile-level selection mask.
          */
         public static function recolorSpriteData(
             sd:SpriteData,
@@ -285,7 +394,9 @@ package otlib.utils
             srcColor:uint,
             tgtColor:uint,
             tolerance:Number,
-            preserveShading:Boolean):SpriteData
+            preserveShading:Boolean,
+            useMask:Boolean = false,
+            tileMask:BitmapData = null):SpriteData
         {
             if (!sd || !sd.pixels) return null;
 
@@ -312,6 +423,25 @@ package otlib.utils
                     continue;
                 }
 
+                // If mask is active, check if pixel (px, py) is selected in tileMask
+                if (useMask && tileMask != null)
+                {
+                    var pixelIdx:uint = i >> 2;
+                    var px:uint = pixelIdx % 32;
+                    var py:uint = uint(pixelIdx / 32);
+
+                    var maskPixel:uint = tileMask.getPixel32(px, py);
+                    if ((maskPixel & 0x00FFFFFF) == 0)
+                    {
+                        // Pixel outside mask, keep original!
+                        newPixels[i] = a;
+                        newPixels[i + 1] = r;
+                        newPixels[i + 2] = g;
+                        newPixels[i + 3] = b;
+                        continue;
+                    }
+                }
+
                 var p:uint = (a << 24) | (r << 16) | (g << 8) | b;
 
                 if (useReplace)
@@ -331,6 +461,7 @@ package otlib.utils
 
         /**
          * Recolors all sprites in a ThingData, returning an updated cloned ThingData.
+         * Supports optional selection mask and multi-view mapping.
          */
         public static function recolorThingData(
             source:ThingData,
@@ -343,7 +474,11 @@ package otlib.utils
             srcColor:uint,
             tgtColor:uint,
             tolerance:Number,
-            preserveShading:Boolean):ThingData
+            preserveShading:Boolean,
+            useMask:Boolean = false,
+            mask:BitmapData = null,
+            applyMaskToAll:Boolean = true,
+            masksByView:Dictionary = null):ThingData
         {
             if (!source) return null;
 
@@ -361,13 +496,58 @@ package otlib.utils
                 var len:uint = sprites.length;
                 var newSprites:Vector.<SpriteData> = new Vector.<SpriteData>(len, true);
 
+                var fgWidth:uint = fg.width;
+                var fgHeight:uint = fg.height;
+
                 for (var i:uint = 0; i < len; i++)
                 {
                     var sd:SpriteData = sprites[i];
                     if (sd && !sd.isEmpty())
                     {
+                        var tileMask:BitmapData = null;
+
+                        if (useMask)
+                        {
+                            var w:uint = i % fgWidth;
+                            var h:uint = uint(i / fgWidth) % fgHeight;
+
+                            var patX:uint = uint(i / (fgWidth * fgHeight * fg.layers)) % fg.patternX;
+                            var patY:uint = uint(i / (fgWidth * fgHeight * fg.layers * fg.patternX)) % fg.patternY;
+                            var frame:uint = uint(i / (fgWidth * fgHeight * fg.layers * fg.patternX * fg.patternY * fg.patternZ)) % fg.frames;
+
+                            var activeMask:BitmapData = null;
+                            if (masksByView != null)
+                            {
+                                var viewKey:String = groupType + "_" + frame + "_" + patX + "_" + patY;
+                                activeMask = masksByView[viewKey] as BitmapData;
+                            }
+
+                            if (!activeMask && applyMaskToAll)
+                            {
+                                activeMask = mask;
+                            }
+
+                            if (activeMask)
+                            {
+                                var tileX:int = (fgWidth - w - 1) * 32;
+                                var tileY:int = (fgHeight - h - 1) * 32;
+
+                                if (tileX + 32 <= activeMask.width && tileY + 32 <= activeMask.height)
+                                {
+                                    tileMask = new BitmapData(32, 32, true, 0x00000000);
+                                    tileMask.copyPixels(activeMask, new Rectangle(tileX, tileY, 32, 32), new Point(0, 0));
+                                }
+                            }
+                        }
+
                         var recoloredSd:SpriteData = recolorSpriteData(
-                            sd, useHsl, hue, sat, light, colorize, useReplace, srcColor, tgtColor, tolerance, preserveShading);
+                            sd, useHsl, hue, sat, light, colorize, useReplace, srcColor, tgtColor, tolerance, preserveShading, useMask, tileMask);
+
+                        if (tileMask)
+                        {
+                            tileMask.dispose();
+                        }
+
                         newSprites[i] = recoloredSd;
                         fg.spriteIndex[i] = uint.MAX_VALUE;
                     }

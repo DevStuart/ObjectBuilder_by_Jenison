@@ -25,10 +25,10 @@ THE SOFTWARE.
     xmlns:s="library://ns.adobe.com/flex/spark"
     xmlns:mx="library://ns.adobe.com/flex/mx"
     xmlns:otlib="otlib.components.*"
-    width="740"
-    height="580"
-    minWidth="680"
-    minHeight="520"
+    width="860"
+    height="660"
+    minWidth="780"
+    minHeight="580"
     backgroundColor="0x383838"
     showStatusBar="false"
     fontSize="11"
@@ -51,21 +51,29 @@ THE SOFTWARE.
             import flash.events.MouseEvent;
             import flash.geom.Point;
             import flash.geom.Rectangle;
-            import flash.ui.Mouse;
-            import flash.ui.MouseCursor;
+            import flash.utils.Dictionary;
 
             import mx.events.ColorPickerEvent;
             import mx.events.FlexEvent;
 
             import otlib.animation.FrameGroup;
             import otlib.geom.Direction;
-            import otlib.geom.Rect;
             import otlib.sprites.SpriteData;
             import otlib.things.FrameGroupType;
             import otlib.things.ThingCategory;
             import otlib.things.ThingData;
             import otlib.utils.RecolorUtils;
             import otlib.utils.SpriteExtent;
+
+            // --------------------------------------------------------------------------
+            // CONSTANTS
+            // --------------------------------------------------------------------------
+
+            public static const TOOL_EYEDROPPER:String = "eyedropper";
+            public static const TOOL_BRUSH:String = "brush";
+            public static const TOOL_ERASER:String = "eraser";
+            public static const TOOL_WAND:String = "wand";
+            public static const TOOL_RECT:String = "rect";
 
             // --------------------------------------------------------------------------
             // PROPERTIES
@@ -75,11 +83,34 @@ THE SOFTWARE.
             private var _baseBitmap:BitmapData;
             private var _recoloredBitmap:BitmapData;
 
+            private var _maskBitmap:BitmapData;
+            private var _maskOverlayBitmap:BitmapData;
+            private var _masksByView:Dictionary = new Dictionary();
+
+            private var _isMouseDown:Boolean = false;
+            private var _rectStartX:int = -1;
+            private var _rectStartY:int = -1;
+
             private var _currentGroupType:uint = FrameGroupType.DEFAULT;
             private var _currentFrame:uint = 0;
             private var _currentLayer:uint = 0;
             private var _currentPatX:uint = 0;
             private var _currentPatY:uint = 0;
+
+            [Bindable]
+            private var _activeTool:String = TOOL_WAND;
+
+            [Bindable]
+            private var _brushSize:uint = 1;
+
+            [Bindable]
+            private var _useMask:Boolean = false;
+
+            [Bindable]
+            private var _showMaskOverlay:Boolean = true;
+
+            [Bindable]
+            private var _applyMaskToAll:Boolean = true;
 
             [Bindable]
             private var _sourceColor:uint = 0xFF0000;
@@ -93,9 +124,6 @@ THE SOFTWARE.
 
             [Bindable]
             private var _previewScale:Number = 2.0;
-
-            [Bindable]
-            private var _eyedropperActive:Boolean = false;
 
             [Bindable]
             private var _hasDirections:Boolean = false;
@@ -146,6 +174,7 @@ THE SOFTWARE.
             private function creationCompleteHandler(event:FlexEvent):void
             {
                 updateDirectionButtons();
+                updateToolButtons();
                 updatePreview();
             }
 
@@ -166,6 +195,33 @@ THE SOFTWARE.
                     _recoloredBitmap.dispose();
                     _recoloredBitmap = null;
                 }
+                if (_maskBitmap)
+                {
+                    _maskBitmap.dispose();
+                    _maskBitmap = null;
+                }
+                if (_maskOverlayBitmap)
+                {
+                    _maskOverlayBitmap.dispose();
+                    _maskOverlayBitmap = null;
+                }
+            }
+
+            private function ensureMaskExists():void
+            {
+                if (!_baseBitmap) return;
+
+                if (!_maskBitmap || _maskBitmap.width != _baseBitmap.width || _maskBitmap.height != _baseBitmap.height)
+                {
+                    if (_maskBitmap) _maskBitmap.dispose();
+                    _maskBitmap = new BitmapData(_baseBitmap.width, _baseBitmap.height, true, 0x00000000);
+                }
+
+                if (!_maskOverlayBitmap || _maskOverlayBitmap.width != _baseBitmap.width || _maskOverlayBitmap.height != _baseBitmap.height)
+                {
+                    if (_maskOverlayBitmap) _maskOverlayBitmap.dispose();
+                    _maskOverlayBitmap = new BitmapData(_baseBitmap.width, _baseBitmap.height, true, 0x00000000);
+                }
             }
 
             private function rebuildBaseBitmap():void
@@ -176,6 +232,8 @@ THE SOFTWARE.
                     _baseBitmap = null;
                 }
                 _baseBitmap = composePreviewBitmap();
+                ensureMaskExists();
+                updateMaskOverlay();
                 updatePreview();
             }
 
@@ -260,43 +318,295 @@ THE SOFTWARE.
                     _sourceColor,
                     _targetColor,
                     toleranceSlider.value,
-                    preserveShadingCheckBox.selected
+                    preserveShadingCheckBox.selected,
+                    _useMask,
+                    _maskBitmap
                 );
 
                 previewImage.source = _recoloredBitmap;
-
-                // Adjust preview display dimensions based on scale
                 previewImage.width = _baseBitmap.width * _previewScale;
                 previewImage.height = _baseBitmap.height * _previewScale;
+
+                updateMaskOverlay();
+            }
+
+            public function updateMaskOverlay():void
+            {
+                if (!_maskBitmap || !_maskOverlayBitmap || !maskOverlayImage) return;
+
+                _maskOverlayBitmap.lock();
+                var w:int = _maskBitmap.width;
+                var h:int = _maskBitmap.height;
+
+                for (var y:int = 0; y < h; y++)
+                {
+                    for (var x:int = 0; x < w; x++)
+                    {
+                        if ((_maskBitmap.getPixel32(x, y) & 0x00FFFFFF) != 0)
+                        {
+                            // 50% opacity electric cyan highlight (0x8000E5FF)
+                            _maskOverlayBitmap.setPixel32(x, y, 0x8000E5FF);
+                        }
+                        else
+                        {
+                            _maskOverlayBitmap.setPixel32(x, y, 0x00000000);
+                        }
+                    }
+                }
+                _maskOverlayBitmap.unlock();
+
+                maskOverlayImage.source = _maskOverlayBitmap;
+                maskOverlayImage.width = _maskBitmap.width * _previewScale;
+                maskOverlayImage.height = _maskBitmap.height * _previewScale;
+                maskOverlayImage.visible = _showMaskOverlay && _useMask;
+            }
+
+            // --------------------------------------------------------------------------
+            // MOUSE & TOOL ACTIONS
+            // --------------------------------------------------------------------------
+
+            private function getPixelCoords(event:MouseEvent):Point
+            {
+                if (!_baseBitmap) return null;
+                var px:int = int(event.localX / _previewScale);
+                var py:int = int(event.localY / _previewScale);
+                if (px < 0) px = 0;
+                if (py < 0) py = 0;
+                if (px >= _baseBitmap.width) px = _baseBitmap.width - 1;
+                if (py >= _baseBitmap.height) py = _baseBitmap.height - 1;
+                return new Point(px, py);
             }
 
             private function onPreviewMouseDown(event:MouseEvent):void
             {
-                if (!_baseBitmap || !previewImage) return;
+                if (!_baseBitmap) return;
+                var pt:Point = getPixelCoords(event);
+                if (!pt) return;
+                var px:int = pt.x;
+                var py:int = pt.y;
 
-                var px:int = int(event.localX / _previewScale);
-                var py:int = int(event.localY / _previewScale);
+                _isMouseDown = true;
 
-                if (px >= 0 && px < _baseBitmap.width && py >= 0 && py < _baseBitmap.height)
+                if (_activeTool == TOOL_EYEDROPPER)
                 {
-                    var p:uint = _baseBitmap.getPixel32(px, py);
-                    var alpha:uint = (p >> 24) & 0xFF;
-                    if (alpha > 0)
-                    {
-                        var rgb:uint = p & 0x00FFFFFF;
-                        if (rgb != 0x00FF00FF)
-                        {
-                            _sourceColor = rgb;
-                            _sourceHex = padHex(rgb.toString(16).toUpperCase());
-                            sourceColorPicker.selectedColor = _sourceColor;
+                    pickColorAt(px, py);
+                    return;
+                }
 
-                            // Automatically activate replace mode if user picked a color
-                            enableReplaceCheckBox.selected = true;
-                            _eyedropperActive = false;
-                            updatePreview();
+                if (_activeTool == TOOL_WAND)
+                {
+                    ensureMaskExists();
+                    var markedCount:uint = RecolorUtils.magicWandSelect(_baseBitmap, _maskBitmap, px, py, toleranceSlider.value);
+                    if (markedCount > 0)
+                    {
+                        _useMask = true;
+                        enableMaskCheckBox.selected = true;
+                    }
+                    updateMaskOverlay();
+                    updatePreview();
+                    return;
+                }
+
+                if (_activeTool == TOOL_RECT)
+                {
+                    _rectStartX = px;
+                    _rectStartY = py;
+                    return;
+                }
+
+                if (_activeTool == TOOL_BRUSH || _activeTool == TOOL_ERASER)
+                {
+                    ensureMaskExists();
+                    applyBrushAt(px, py, (_activeTool == TOOL_BRUSH));
+                    if (_activeTool == TOOL_BRUSH)
+                    {
+                        _useMask = true;
+                        enableMaskCheckBox.selected = true;
+                    }
+                    updateMaskOverlay();
+                    updatePreview();
+                }
+            }
+
+            private function onPreviewMouseMove(event:MouseEvent):void
+            {
+                if (!_isMouseDown || !_baseBitmap) return;
+
+                var pt:Point = getPixelCoords(event);
+                if (!pt) return;
+                var px:int = pt.x;
+                var py:int = pt.y;
+
+                if (_activeTool == TOOL_BRUSH || _activeTool == TOOL_ERASER)
+                {
+                    ensureMaskExists();
+                    applyBrushAt(px, py, (_activeTool == TOOL_BRUSH));
+                    updateMaskOverlay();
+                    updatePreview();
+                }
+            }
+
+            private function onPreviewMouseUp(event:MouseEvent):void
+            {
+                if (!_isMouseDown) return;
+                _isMouseDown = false;
+
+                if (_activeTool == TOOL_RECT && _rectStartX >= 0 && _rectStartY >= 0)
+                {
+                    var pt:Point = getPixelCoords(event);
+                    if (pt)
+                    {
+                        ensureMaskExists();
+                        var minX:int = Math.min(_rectStartX, pt.x);
+                        var maxX:int = Math.max(_rectStartX, pt.x);
+                        var minY:int = Math.min(_rectStartY, pt.y);
+                        var maxY:int = Math.max(_rectStartY, pt.y);
+
+                        for (var y:int = minY; y <= maxY; y++)
+                        {
+                            for (var x:int = minX; x <= maxX; x++)
+                            {
+                                var alpha:uint = (_baseBitmap.getPixel32(x, y) >> 24) & 0xFF;
+                                if (alpha > 0)
+                                {
+                                    _maskBitmap.setPixel32(x, y, 0xFFFFFFFF);
+                                }
+                            }
+                        }
+                        _useMask = true;
+                        enableMaskCheckBox.selected = true;
+                        updateMaskOverlay();
+                        updatePreview();
+                    }
+                    _rectStartX = -1;
+                    _rectStartY = -1;
+                }
+            }
+
+            private function applyBrushAt(px:int, py:int, mark:Boolean):void
+            {
+                var half:int = int(_brushSize / 2);
+                var color:uint = mark ? 0xFFFFFFFF : 0x00000000;
+                for (var ox:int = -half; ox <= half; ox++)
+                {
+                    for (var oy:int = -half; oy <= half; oy++)
+                    {
+                        var gx:int = px + ox;
+                        var gy:int = py + oy;
+                        if (gx >= 0 && gx < _maskBitmap.width && gy >= 0 && gy < _maskBitmap.height)
+                        {
+                            if (!mark || ((_baseBitmap.getPixel32(gx, gy) >> 24) & 0xFF) > 0)
+                            {
+                                _maskBitmap.setPixel32(gx, gy, color);
+                            }
                         }
                     }
                 }
+            }
+
+            private function pickColorAt(px:int, py:int):void
+            {
+                if (!_baseBitmap) return;
+                var p:uint = _baseBitmap.getPixel32(px, py);
+                var alpha:uint = (p >> 24) & 0xFF;
+                if (alpha > 0)
+                {
+                    var rgb:uint = p & 0x00FFFFFF;
+                    if (rgb != 0x00FF00FF)
+                    {
+                        _sourceColor = rgb;
+                        _sourceHex = padHex(rgb.toString(16).toUpperCase());
+                        sourceColorPicker.selectedColor = _sourceColor;
+                        enableReplaceCheckBox.selected = true;
+                        updatePreview();
+                    }
+                }
+            }
+
+            public function selectAllMask():void
+            {
+                ensureMaskExists();
+                for (var y:int = 0; y < _baseBitmap.height; y++)
+                {
+                    for (var x:int = 0; x < _baseBitmap.width; x++)
+                    {
+                        if (((_baseBitmap.getPixel32(x, y) >> 24) & 0xFF) > 0)
+                            _maskBitmap.setPixel32(x, y, 0xFFFFFFFF);
+                    }
+                }
+                _useMask = true;
+                enableMaskCheckBox.selected = true;
+                updateMaskOverlay();
+                updatePreview();
+            }
+
+            public function clearMask():void
+            {
+                if (_maskBitmap)
+                    _maskBitmap.fillRect(_maskBitmap.rect, 0x00000000);
+                updateMaskOverlay();
+                updatePreview();
+            }
+
+            public function invertMask():void
+            {
+                ensureMaskExists();
+                for (var y:int = 0; y < _baseBitmap.height; y++)
+                {
+                    for (var x:int = 0; x < _baseBitmap.width; x++)
+                    {
+                        if (((_baseBitmap.getPixel32(x, y) >> 24) & 0xFF) > 0)
+                        {
+                            var isSet:Boolean = ((_maskBitmap.getPixel32(x, y) & 0x00FFFFFF) != 0);
+                            _maskBitmap.setPixel32(x, y, isSet ? 0x00000000 : 0xFFFFFFFF);
+                        }
+                        else
+                        {
+                            _maskBitmap.setPixel32(x, y, 0x00000000);
+                        }
+                    }
+                }
+                _useMask = true;
+                enableMaskCheckBox.selected = true;
+                updateMaskOverlay();
+                updatePreview();
+            }
+
+            private function setTool(tool:String):void
+            {
+                _activeTool = tool;
+                updateToolButtons();
+            }
+
+            private function updateToolButtons():void
+            {
+                wandBtn.selected = (_activeTool == TOOL_WAND);
+                brushBtn.selected = (_activeTool == TOOL_BRUSH);
+                eraserBtn.selected = (_activeTool == TOOL_ERASER);
+                rectBtn.selected = (_activeTool == TOOL_RECT);
+                eyedropperBtn.selected = (_activeTool == TOOL_EYEDROPPER);
+            }
+
+            private function onBrushSizeChange(size:uint):void
+            {
+                _brushSize = size;
+                bSize1Btn.selected = (size == 1);
+                bSize2Btn.selected = (size == 2);
+                bSize3Btn.selected = (size == 3);
+                bSize4Btn.selected = (size == 4);
+            }
+
+            private function onMaskEnableChange():void
+            {
+                _useMask = enableMaskCheckBox.selected;
+                updateMaskOverlay();
+                updatePreview();
+            }
+
+            private function onShowOverlayChange():void
+            {
+                _showMaskOverlay = showOverlayCheckBox.selected;
+                updateMaskOverlay();
             }
 
             private function padHex(hex:String):String
@@ -394,11 +704,6 @@ THE SOFTWARE.
                 updatePreview();
             }
 
-            private function toggleEyedropper():void
-            {
-                _eyedropperActive = !_eyedropperActive;
-            }
-
             private function resetAll():void
             {
                 enableHslCheckBox.selected = true;
@@ -417,6 +722,10 @@ THE SOFTWARE.
                 toleranceSlider.value = 15;
                 preserveShadingCheckBox.selected = true;
 
+                _useMask = false;
+                enableMaskCheckBox.selected = false;
+                clearMask();
+
                 updatePreview();
             }
 
@@ -433,7 +742,11 @@ THE SOFTWARE.
                     _sourceColor,
                     _targetColor,
                     toleranceSlider.value,
-                    preserveShadingCheckBox.selected
+                    preserveShadingCheckBox.selected,
+                    _useMask,
+                    _maskBitmap,
+                    _applyMaskToAll,
+                    _masksByView
                 );
             }
 
@@ -459,14 +772,14 @@ THE SOFTWARE.
         ]]>
     </fx:Script>
 
-    <!-- Main Split Layout: Left Preview, Right Settings -->
+    <!-- Main Split Layout: Left Preview & Mask Tools, Right Color Settings -->
     <s:HGroup width="100%" height="100%" gap="16">
 
-        <!-- Left Column: Preview + Tools -->
-        <s:VGroup width="310" height="100%" gap="8">
+        <!-- Left Column: Preview + Mask Selection Toolbar -->
+        <s:VGroup width="360" height="100%" gap="8">
             <s:Label text="{_objectInfo}" fontWeight="bold" fontSize="13" color="0xFFFFFF"/>
 
-            <!-- Checkerboard Preview Container -->
+            <!-- Checkerboard Preview Container with Mask Overlay -->
             <s:BorderContainer width="100%" height="280" backgroundColor="0x282828" borderColor="0x202020" borderWeight="1" cornerRadius="4">
                 <s:layout>
                     <s:BasicLayout/>
@@ -475,34 +788,98 @@ THE SOFTWARE.
                 <!-- Checkerboard Background -->
                 <otlib:CheckerBoard width="100%" height="100%" cellSize="16"/>
 
-                <!-- Centered Preview Image -->
+                <!-- Centered Preview Image & Overlay -->
                 <s:Group horizontalCenter="0" verticalCenter="0">
                     <s:Image id="previewImage"
                         scaleMode="letterbox"
                         smooth="false"
-                        useHandCursor="{_eyedropperActive}"
-                        buttonMode="{_eyedropperActive}"
-                        mouseDown="onPreviewMouseDown(event)"/>
+                        useHandCursor="true"
+                        buttonMode="true"
+                        mouseDown="onPreviewMouseDown(event)"
+                        mouseMove="onPreviewMouseMove(event)"
+                        mouseUp="onPreviewMouseUp(event)"/>
+                    <s:Image id="maskOverlayImage"
+                        scaleMode="letterbox"
+                        smooth="false"
+                        mouseEnabled="false"
+                        mouseChildren="false"/>
                 </s:Group>
             </s:BorderContainer>
 
-            <!-- Preview Controls: Zoom & Eyedropper -->
+            <!-- Preview Controls: Zoom -->
             <s:HGroup width="100%" verticalAlign="middle" gap="6">
                 <s:Label text="Zoom:" color="0xCCCCCC"/>
                 <s:ToggleButton id="scale1Btn" label="1x" width="34" height="22" click="onScaleChange(1.0)"/>
                 <s:ToggleButton id="scale2Btn" label="2x" width="34" height="22" selected="true" click="onScaleChange(2.0)"/>
                 <s:ToggleButton id="scale3Btn" label="3x" width="34" height="22" click="onScaleChange(3.0)"/>
                 <s:ToggleButton id="scale4Btn" label="4x" width="34" height="22" click="onScaleChange(4.0)"/>
-
                 <s:Spacer width="100%"/>
-
-                <s:ToggleButton id="eyedropperBtn"
-                    label="@Resource(key='pickColor', bundle='strings')"
-                    selected="{_eyedropperActive}"
-                    height="22"
-                    toolTip="Clique para ativar conta-gotas e selecionar cor direto no preview"
-                    click="toggleEyedropper()"/>
+                <s:CheckBox id="showOverlayCheckBox"
+                    label="@Resource(key='showOverlay', bundle='strings')"
+                    selected="{_showMaskOverlay}"
+                    change="onShowOverlayChange()"/>
             </s:HGroup>
+
+            <!-- Mask Tools Toolbar -->
+            <s:BorderContainer width="100%" backgroundColor="0x2C2C2C" borderColor="0x202020" cornerRadius="4">
+                <s:layout>
+                    <s:VerticalLayout paddingLeft="8" paddingRight="8" paddingTop="6" paddingBottom="8" gap="6"/>
+                </s:layout>
+
+                <!-- Tools Row -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="4">
+                    <s:ToggleButton id="wandBtn"
+                        label="@Resource(key='toolWand', bundle='strings')"
+                        toolTip="Varinha Mágica: Clica na parte conectada (ex: bainha, capa, camisa) para selecionar instantaneamente"
+                        selected="true"
+                        height="24"
+                        click="setTool(TOOL_WAND)"/>
+                    <s:ToggleButton id="brushBtn"
+                        label="@Resource(key='toolBrush', bundle='strings')"
+                        toolTip="Pincel: Pinte livremente os pixels que quer recolorir"
+                        height="24"
+                        click="setTool(TOOL_BRUSH)"/>
+                    <s:ToggleButton id="eraserBtn"
+                        label="@Resource(key='toolEraser', bundle='strings')"
+                        toolTip="Borracha: Desmarca pixels da seleção"
+                        height="24"
+                        click="setTool(TOOL_ERASER)"/>
+                    <s:ToggleButton id="rectBtn"
+                        label="@Resource(key='toolRect', bundle='strings')"
+                        toolTip="Retângulo: Arraste para selecionar uma área quadrada/retangular"
+                        height="24"
+                        click="setTool(TOOL_RECT)"/>
+                    <s:ToggleButton id="eyedropperBtn"
+                        label="@Resource(key='pickColor', bundle='strings')"
+                        toolTip="Conta-Gotas: Pega a cor sob o clique para a substituição de cor"
+                        height="24"
+                        click="setTool(TOOL_EYEDROPPER)"/>
+                </s:HGroup>
+
+                <!-- Brush Size & Mask Quick Actions -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="6">
+                    <s:Label text="@Resource(key='brushSize', bundle='strings')" color="0xBBBBBB"/>
+                    <s:ToggleButton id="bSize1Btn" label="1" width="24" height="20" selected="true" click="onBrushSizeChange(1)"/>
+                    <s:ToggleButton id="bSize2Btn" label="2" width="24" height="20" click="onBrushSizeChange(2)"/>
+                    <s:ToggleButton id="bSize3Btn" label="3" width="24" height="20" click="onBrushSizeChange(3)"/>
+                    <s:ToggleButton id="bSize4Btn" label="4" width="24" height="20" click="onBrushSizeChange(4)"/>
+
+                    <s:Spacer width="100%"/>
+
+                    <s:Button id="selectAllBtn"
+                        label="@Resource(key='selectAllMask', bundle='strings')"
+                        height="20"
+                        click="selectAllMask()"/>
+                    <s:Button id="clearMaskBtn"
+                        label="@Resource(key='clearMask', bundle='strings')"
+                        height="20"
+                        click="clearMask()"/>
+                    <s:Button id="invertMaskBtn"
+                        label="@Resource(key='invertMask', bundle='strings')"
+                        height="20"
+                        click="invertMask()"/>
+                </s:HGroup>
+            </s:BorderContainer>
 
             <!-- Direction Buttons (For Outfits / Missiles) -->
             <s:HGroup width="100%" verticalAlign="middle" gap="6" visible="{_hasDirections}" includeInLayout="{_hasDirections}">
@@ -529,7 +906,32 @@ THE SOFTWARE.
         </s:VGroup>
 
         <!-- Right Column: Recolor Settings -->
-        <s:VGroup width="100%" height="100%" gap="12">
+        <s:VGroup width="100%" height="100%" gap="10">
+
+            <!-- Section 0: Ativação da Área Marcada (Selection Mask Toggle) -->
+            <s:BorderContainer width="100%" backgroundColor="0x26333D" borderColor="0x1D4A6E" borderWeight="1" cornerRadius="4">
+                <s:layout>
+                    <s:VerticalLayout paddingLeft="10" paddingRight="10" paddingTop="8" paddingBottom="8" gap="6"/>
+                </s:layout>
+
+                <s:HGroup width="100%" verticalAlign="middle">
+                    <s:CheckBox id="enableMaskCheckBox"
+                        label="@Resource(key='enableAreaMask', bundle='strings')"
+                        selected="{_useMask}"
+                        fontWeight="bold"
+                        fontSize="12"
+                        color="0x40C4FF"
+                        change="onMaskEnableChange()"/>
+                    <s:Spacer width="100%"/>
+                    <s:CheckBox id="applyAllFramesCheckBox"
+                        label="@Resource(key='applyMaskAllFrames', bundle='strings')"
+                        selected="{_applyMaskToAll}"
+                        color="0xCCCCCC"
+                        change="{_applyMaskToAll = applyAllFramesCheckBox.selected}"/>
+                </s:HGroup>
+                <s:Label text="Marque com o pincel ou varinha mágica apenas a bainha da espada, a capa ou a camisa para recolorir somente essa parte."
+                    color="0x90CAF9" fontSize="10"/>
+            </s:BorderContainer>
 
             <!-- Section 1: Matiz e Saturação (HSL) -->
             <s:BorderContainer width="100%" backgroundColor="0x2E2E2E" borderColor="0x222222" cornerRadius="4">

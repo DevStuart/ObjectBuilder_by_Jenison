@@ -17,3 +17,7 @@ workerswfs/
 # should NOT be excluded as they contain compiler settings and other important
 # information for Eclipse / Flash Builder.
 
+
+# Server scripts backup
+_server_vps_scripts_backup/
+dist/
