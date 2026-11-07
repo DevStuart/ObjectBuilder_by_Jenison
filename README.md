@@ -59,7 +59,16 @@ O **Object Builder** é um editor visual completo para criação e edição de o
 Se este projeto te ajudou e você deseja apoiar o desenvolvimento contínuo de novas melhorias:
 
 * 💳 **PayPal**: `arceusp@outlook.com`
-* 📱 **PIX (Chave E-mail)**: `jenison06@gmail.com`
+* 📱 **PIX (QR Code & Copia e Cola)**:
+
+<p align="center">
+  <img src="pix_qrcode.png" alt="PIX QR Code" width="220" /><br>
+  <sub><b>JENISON WILKER COSTA SILV</b> - Escaneie no app do seu banco ou use o código abaixo:</sub>
+</p>
+
+```text
+00020101021126580014BR.GOV.BCB.PIX0136983833f2-f4b1-4536-a81a-6059a7fbca5b5204000053039865802BR5925JENISON WILKER COSTA SILV6009SAO PAULO62080504daqr6304B0F8
+```
 
 ---
 
