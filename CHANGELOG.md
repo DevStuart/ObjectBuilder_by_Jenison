@@ -1,5 +1,13 @@
 ### Unreleased
 
+Features:
+
+* Recolor mask Undo/Redo (toolbar + Ctrl+Z / Ctrl+Y), with per-stroke history for brush/eraser.
+* Recolor masks persist per direction/frame; "Copy mask to all frames" and clearer note that save recolors the whole object.
+* Color presets in Recolor: Shiny, Fire, Ice, Poison, Shadow, Blood.
+* Recent color history for eyedropper / source color in Recolor.
+* Find window: copy/paste sprites from clipboard (paste replaces the selected sprite).
+
 Bug Fixes:
 
 * Implemented replace sprite from the Find window results (was a no-op TODO). Enabled the sprites context menu so Replace and Export work there.

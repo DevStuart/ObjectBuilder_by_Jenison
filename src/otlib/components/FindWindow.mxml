@@ -77,6 +77,11 @@ THE SOFTWARE.
             import otlib.assets.Assets;
             import otlib.components.renders.SpriteListRenderer;
             import otlib.components.renders.ThingListRenderer;
+            import flash.desktop.Clipboard;
+            import flash.desktop.ClipboardFormats;
+            import flash.display.BitmapData;
+            import flash.utils.ByteArray;
+            
             import otlib.sprites.SpriteData;
             import otlib.things.BindableThingType;
             import otlib.things.ThingCategory;
@@ -86,6 +91,8 @@ THE SOFTWARE.
             import otlib.utils.ThingListItem;
             import otlib.loaders.PathHelper;
             import otlib.utils.OTFormat;
+            import otlib.utils.SpriteExtent;
+            import otlib.utils.SpriteUtils;
             import otlib.items.ItemAttributeStorage;
             import otlib.items.ItemAttribute;
             import otlib.obd.OBDVersions;
@@ -100,6 +107,7 @@ THE SOFTWARE.
             import ob.commands.things.UpdateThingPropertiesCommand;
             import ob.commands.things.UpdateThingCommand;
             import ob.commands.sprites.ExportSpritesCommand;
+            import ob.commands.sprites.ReplaceSpritesCommand;
             
             import otlib.events.ThingListEvent;
             import otlib.events.SpriteListEvent;
@@ -906,6 +914,42 @@ THE SOFTWARE.
                 }
             }
             
+            protected function copySpriteHandler(event:Event):void
+            {
+                var data:SpriteData = spritesList.selectedSprite;
+                if (!data)
+                    return;
+            
+                var bitmap:BitmapData = data.getBitmap(0xFFFF00FF);
+                if (!bitmap)
+                    return;
+            
+                Clipboard.generalClipboard.clear();
+                Clipboard.generalClipboard.setData(ClipboardFormats.BITMAP_FORMAT, bitmap);
+            }
+            
+            protected function pasteSpriteHandler(event:Event):void
+            {
+                if (!m_application || !m_application.clientLoaded)
+                    return;
+            
+                if (!Clipboard.generalClipboard.hasFormat(ClipboardFormats.BITMAP_FORMAT))
+                    return;
+            
+                if (spritesList.multipleSelected || spritesList.selectedId == 0)
+                    return;
+            
+                var bitmap:BitmapData = BitmapData(Clipboard.generalClipboard.getData(ClipboardFormats.BITMAP_FORMAT));
+                bitmap = SpriteUtils.removeMagenta(bitmap);
+            
+                if (!bitmap || bitmap.width != SpriteExtent.DEFAULT_SIZE || bitmap.height != SpriteExtent.DEFAULT_SIZE)
+                    return;
+            
+                var pixels:ByteArray = bitmap.getPixels(bitmap.rect);
+                var spriteData:SpriteData = SpriteData.createSpriteData(spritesList.selectedId, pixels);
+                m_application.sendCommand(new ReplaceSpritesCommand(Vector.<SpriteData>([spriteData])));
+            }
+            
             protected function closingHandler(event:Event):void
             {
                 this.communicator = null;
@@ -1497,7 +1541,9 @@ THE SOFTWARE.
                     doubleClick="doubleClickHandler(event)"
                     remove="removeSpriteHandler(event)"
                     export="exportSpriteHandler(event)"
-                    replace="replaceSpriteHandler(event)"/>
+                    replace="replaceSpriteHandler(event)"
+                    copy="copySpriteHandler(event)"
+                    paste="pasteSpriteHandler(event)"/>
             </nail:GroupBox>
         </s:NavigatorContent>
     </nail:TabNavigator>

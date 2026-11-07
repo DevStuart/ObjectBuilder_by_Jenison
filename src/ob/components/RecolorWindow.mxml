@@ -25,16 +25,17 @@ THE SOFTWARE.
     xmlns:s="library://ns.adobe.com/flex/spark"
     xmlns:mx="library://ns.adobe.com/flex/mx"
     xmlns:otlib="otlib.components.*"
-    width="860"
-    height="660"
-    minWidth="780"
-    minHeight="580"
+    width="900"
+    height="720"
+    minWidth="820"
+    minHeight="620"
     backgroundColor="0x383838"
     showStatusBar="false"
     fontSize="11"
     title="@Resource(key='recolorTitle', bundle='strings')"
     creationComplete="creationCompleteHandler(event)"
-    close="closeHandler(event)">
+    close="closeHandler(event)"
+    keyDown="windowKeyDownHandler(event)">
 
     <s:layout>
         <s:VerticalLayout paddingLeft="12" paddingRight="12" paddingTop="12" paddingBottom="12" gap="10"/>
@@ -48,13 +49,17 @@ THE SOFTWARE.
         <![CDATA[
             import flash.display.BitmapData;
             import flash.events.Event;
+            import flash.events.KeyboardEvent;
             import flash.events.MouseEvent;
             import flash.geom.Point;
             import flash.geom.Rectangle;
+            import flash.ui.Keyboard;
             import flash.utils.Dictionary;
 
             import mx.events.ColorPickerEvent;
             import mx.events.FlexEvent;
+
+            import spark.components.BorderContainer;
 
             import otlib.animation.FrameGroup;
             import otlib.geom.Direction;
@@ -75,6 +80,9 @@ THE SOFTWARE.
             public static const TOOL_WAND:String = "wand";
             public static const TOOL_RECT:String = "rect";
 
+            private static const MASK_HISTORY_LIMIT:uint = 30;
+            private static const COLOR_HISTORY_MAX:uint = 8;
+
             // --------------------------------------------------------------------------
             // PROPERTIES
             // --------------------------------------------------------------------------
@@ -86,10 +94,21 @@ THE SOFTWARE.
             private var _maskBitmap:BitmapData;
             private var _maskOverlayBitmap:BitmapData;
             private var _masksByView:Dictionary = new Dictionary();
+            private var _maskUndoStack:Vector.<BitmapData> = new Vector.<BitmapData>();
+            private var _maskRedoStack:Vector.<BitmapData> = new Vector.<BitmapData>();
+            private var _maskStrokeActive:Boolean = false;
+            private var _colorHistory:Array = [];
+            private var _swatchColorMap:Dictionary = new Dictionary(true);
 
             private var _isMouseDown:Boolean = false;
             private var _rectStartX:int = -1;
             private var _rectStartY:int = -1;
+
+            [Bindable]
+            private var _canUndoMask:Boolean = false;
+
+            [Bindable]
+            private var _canRedoMask:Boolean = false;
 
             private var _currentGroupType:uint = FrameGroupType.DEFAULT;
             private var _currentFrame:uint = 0;
@@ -204,6 +223,262 @@ THE SOFTWARE.
                 {
                     _maskOverlayBitmap.dispose();
                     _maskOverlayBitmap = null;
+                }
+                clearMaskHistory();
+                for (var key:String in _masksByView)
+                {
+                    var viewMask:BitmapData = _masksByView[key] as BitmapData;
+                    if (viewMask)
+                        viewMask.dispose();
+                    delete _masksByView[key];
+                }
+            }
+
+            private function clearMaskHistory():void
+            {
+                var i:int;
+                for (i = 0; i < _maskUndoStack.length; i++)
+                    _maskUndoStack[i].dispose();
+                _maskUndoStack.length = 0;
+                for (i = 0; i < _maskRedoStack.length; i++)
+                    _maskRedoStack[i].dispose();
+                _maskRedoStack.length = 0;
+                updateMaskHistoryButtons();
+            }
+
+            private function updateMaskHistoryButtons():void
+            {
+                _canUndoMask = _maskUndoStack.length > 0;
+                _canRedoMask = _maskRedoStack.length > 0;
+            }
+
+            private function pushMaskHistory():void
+            {
+                ensureMaskExists();
+                if (!_maskBitmap)
+                    return;
+
+                _maskUndoStack.push(_maskBitmap.clone());
+                while (_maskUndoStack.length > MASK_HISTORY_LIMIT)
+                {
+                    var old:BitmapData = _maskUndoStack.shift();
+                    old.dispose();
+                }
+
+                for (var i:int = 0; i < _maskRedoStack.length; i++)
+                    _maskRedoStack[i].dispose();
+                _maskRedoStack.length = 0;
+                updateMaskHistoryButtons();
+            }
+
+            private function undoMask():void
+            {
+                if (_maskUndoStack.length == 0)
+                    return;
+
+                ensureMaskExists();
+                _maskRedoStack.push(_maskBitmap.clone());
+                var prev:BitmapData = _maskUndoStack.pop();
+                _maskBitmap.copyPixels(prev, prev.rect, new Point(0, 0));
+                prev.dispose();
+                updateMaskOverlay();
+                updatePreview();
+                updateMaskHistoryButtons();
+            }
+
+            private function redoMask():void
+            {
+                if (_maskRedoStack.length == 0)
+                    return;
+
+                ensureMaskExists();
+                _maskUndoStack.push(_maskBitmap.clone());
+                var next:BitmapData = _maskRedoStack.pop();
+                _maskBitmap.copyPixels(next, next.rect, new Point(0, 0));
+                next.dispose();
+                updateMaskOverlay();
+                updatePreview();
+                updateMaskHistoryButtons();
+            }
+
+            private function getCurrentViewKey():String
+            {
+                return _currentGroupType + "_" + _currentFrame + "_" + _currentPatX + "_" + _currentPatY;
+            }
+
+            private function saveCurrentMaskToView():void
+            {
+                if (!_maskBitmap)
+                    return;
+
+                var key:String = getCurrentViewKey();
+                var old:BitmapData = _masksByView[key] as BitmapData;
+                if (old)
+                    old.dispose();
+                _masksByView[key] = _maskBitmap.clone();
+            }
+
+            private function restoreMaskForView():void
+            {
+                ensureMaskExists();
+                if (!_maskBitmap)
+                    return;
+
+                var saved:BitmapData = _masksByView[getCurrentViewKey()] as BitmapData;
+                if (saved && saved.width == _maskBitmap.width && saved.height == _maskBitmap.height)
+                    _maskBitmap.copyPixels(saved, saved.rect, new Point(0, 0));
+                else
+                    _maskBitmap.fillRect(_maskBitmap.rect, 0x00000000);
+            }
+
+            private function copyMaskToAllViews():void
+            {
+                ensureMaskExists();
+                if (!_maskBitmap || !_thingData || !_thingData.thing)
+                    return;
+
+                var fg:FrameGroup = _thingData.thing.getFrameGroup(_currentGroupType);
+                if (!fg)
+                    fg = _thingData.thing.getFrameGroup(FrameGroupType.DEFAULT);
+                if (!fg)
+                    return;
+
+                for (var f:uint = 0; f < fg.frames; f++)
+                {
+                    for (var px:uint = 0; px < fg.patternX; px++)
+                    {
+                        for (var py:uint = 0; py < fg.patternY; py++)
+                        {
+                            var key:String = _currentGroupType + "_" + f + "_" + px + "_" + py;
+                            var old:BitmapData = _masksByView[key] as BitmapData;
+                            if (old)
+                                old.dispose();
+                            _masksByView[key] = _maskBitmap.clone();
+                        }
+                    }
+                }
+
+                _applyMaskToAll = true;
+                if (applyAllFramesCheckBox)
+                    applyAllFramesCheckBox.selected = true;
+            }
+
+            private function addColorToHistory(color:uint):void
+            {
+                color = color & 0x00FFFFFF;
+                var idx:int = _colorHistory.indexOf(color);
+                if (idx >= 0)
+                    _colorHistory.splice(idx, 1);
+                _colorHistory.unshift(color);
+                while (_colorHistory.length > COLOR_HISTORY_MAX)
+                    _colorHistory.pop();
+                rebuildColorHistoryUI();
+            }
+
+            private function rebuildColorHistoryUI():void
+            {
+                if (!colorHistoryGroup)
+                    return;
+
+                colorHistoryGroup.removeAllElements();
+                _swatchColorMap = new Dictionary(true);
+
+                for (var i:int = 0; i < _colorHistory.length; i++)
+                {
+                    var color:uint = uint(_colorHistory[i]);
+                    var swatch:BorderContainer = new BorderContainer();
+                    swatch.width = 18;
+                    swatch.height = 18;
+                    swatch.setStyle("backgroundColor", color);
+                    swatch.setStyle("borderColor", 0x111111);
+                    swatch.setStyle("borderWeight", 1);
+                    swatch.setStyle("cornerRadius", 2);
+                    swatch.buttonMode = true;
+                    swatch.useHandCursor = true;
+                    swatch.toolTip = "#" + padHex(color.toString(16).toUpperCase());
+                    swatch.addEventListener(MouseEvent.CLICK, onHistorySwatchClick);
+                    _swatchColorMap[swatch] = color;
+                    colorHistoryGroup.addElement(swatch);
+                }
+            }
+
+            private function onHistorySwatchClick(event:MouseEvent):void
+            {
+                if (_swatchColorMap[event.currentTarget] == undefined)
+                    return;
+                pickHistoryColor(uint(_swatchColorMap[event.currentTarget]));
+            }
+
+            private function pickHistoryColor(color:uint):void
+            {
+                _sourceColor = color & 0x00FFFFFF;
+                _sourceHex = padHex(_sourceColor.toString(16).toUpperCase());
+                if (sourceColorPicker)
+                    sourceColorPicker.selectedColor = _sourceColor;
+                if (enableReplaceCheckBox)
+                    enableReplaceCheckBox.selected = true;
+                updatePreview();
+            }
+
+            private function applyPreset(preset:String):void
+            {
+                if (enableHslCheckBox)
+                    enableHslCheckBox.selected = true;
+                if (colorizeCheckBox)
+                    colorizeCheckBox.selected = true;
+                if (enableReplaceCheckBox)
+                    enableReplaceCheckBox.selected = false;
+
+                switch (preset)
+                {
+                    case "shiny":
+                        hueSlider.value = 45;
+                        satSlider.value = 85;
+                        lightSlider.value = 15;
+                        break;
+                    case "fire":
+                        hueSlider.value = 15;
+                        satSlider.value = 95;
+                        lightSlider.value = 5;
+                        break;
+                    case "ice":
+                        hueSlider.value = 200;
+                        satSlider.value = 70;
+                        lightSlider.value = 10;
+                        break;
+                    case "poison":
+                        hueSlider.value = 110;
+                        satSlider.value = 80;
+                        lightSlider.value = -5;
+                        break;
+                    case "shadow":
+                        hueSlider.value = 270;
+                        satSlider.value = 40;
+                        lightSlider.value = -25;
+                        break;
+                    case "blood":
+                        hueSlider.value = 0;
+                        satSlider.value = 90;
+                        lightSlider.value = -10;
+                        break;
+                }
+                updatePreview();
+            }
+
+            private function windowKeyDownHandler(event:KeyboardEvent):void
+            {
+                if (!event.ctrlKey)
+                    return;
+
+                if (event.keyCode == Keyboard.Z)
+                {
+                    undoMask();
+                    event.preventDefault();
+                }
+                else if (event.keyCode == Keyboard.Y)
+                {
+                    redoMask();
+                    event.preventDefault();
                 }
             }
 
@@ -396,6 +671,7 @@ THE SOFTWARE.
                 if (_activeTool == TOOL_WAND)
                 {
                     ensureMaskExists();
+                    pushMaskHistory();
                     var markedCount:uint = RecolorUtils.magicWandSelect(_baseBitmap, _maskBitmap, px, py, toleranceSlider.value);
                     if (markedCount > 0)
                     {
@@ -417,6 +693,11 @@ THE SOFTWARE.
                 if (_activeTool == TOOL_BRUSH || _activeTool == TOOL_ERASER)
                 {
                     ensureMaskExists();
+                    if (!_maskStrokeActive)
+                    {
+                        pushMaskHistory();
+                        _maskStrokeActive = true;
+                    }
                     applyBrushAt(px, py, (_activeTool == TOOL_BRUSH));
                     if (_activeTool == TOOL_BRUSH)
                     {
@@ -450,6 +731,7 @@ THE SOFTWARE.
             {
                 if (!_isMouseDown) return;
                 _isMouseDown = false;
+                _maskStrokeActive = false;
 
                 if (_activeTool == TOOL_RECT && _rectStartX >= 0 && _rectStartY >= 0)
                 {
@@ -457,6 +739,7 @@ THE SOFTWARE.
                     if (pt)
                     {
                         ensureMaskExists();
+                        pushMaskHistory();
                         var minX:int = Math.min(_rectStartX, pt.x);
                         var maxX:int = Math.max(_rectStartX, pt.x);
                         var minY:int = Math.min(_rectStartY, pt.y);
@@ -518,6 +801,7 @@ THE SOFTWARE.
                         _sourceHex = padHex(rgb.toString(16).toUpperCase());
                         sourceColorPicker.selectedColor = _sourceColor;
                         enableReplaceCheckBox.selected = true;
+                        addColorToHistory(rgb);
                         updatePreview();
                     }
                 }
@@ -526,6 +810,7 @@ THE SOFTWARE.
             public function selectAllMask():void
             {
                 ensureMaskExists();
+                pushMaskHistory();
                 for (var y:int = 0; y < _baseBitmap.height; y++)
                 {
                     for (var x:int = 0; x < _baseBitmap.width; x++)
@@ -542,8 +827,10 @@ THE SOFTWARE.
 
             public function clearMask():void
             {
-                if (_maskBitmap)
-                    _maskBitmap.fillRect(_maskBitmap.rect, 0x00000000);
+                if (!_maskBitmap)
+                    return;
+                pushMaskHistory();
+                _maskBitmap.fillRect(_maskBitmap.rect, 0x00000000);
                 updateMaskOverlay();
                 updatePreview();
             }
@@ -551,6 +838,7 @@ THE SOFTWARE.
             public function invertMask():void
             {
                 ensureMaskExists();
+                pushMaskHistory();
                 for (var y:int = 0; y < _baseBitmap.height; y++)
                 {
                     for (var x:int = 0; x < _baseBitmap.width; x++)
@@ -619,6 +907,7 @@ THE SOFTWARE.
             {
                 _sourceColor = event.color;
                 _sourceHex = padHex(_sourceColor.toString(16).toUpperCase());
+                addColorToHistory(_sourceColor);
                 updatePreview();
             }
 
@@ -637,6 +926,7 @@ THE SOFTWARE.
                     _sourceColor = parseInt(clean, 16);
                     _sourceHex = clean.toUpperCase();
                     sourceColorPicker.selectedColor = _sourceColor;
+                    addColorToHistory(_sourceColor);
                     updatePreview();
                 }
             }
@@ -655,6 +945,7 @@ THE SOFTWARE.
 
             private function setDirection(dir:uint):void
             {
+                saveCurrentMaskToView();
                 var isOutfit:Boolean = (_thingData && _thingData.category == ThingCategory.OUTFIT);
                 switch(dir)
                 {
@@ -677,6 +968,10 @@ THE SOFTWARE.
                 }
                 updateDirectionButtons();
                 rebuildBaseBitmap();
+                if (!_applyMaskToAll)
+                    restoreMaskForView();
+                updateMaskOverlay();
+                updatePreview();
             }
 
             private function updateDirectionButtons():void
@@ -690,8 +985,13 @@ THE SOFTWARE.
 
             private function onFrameChange():void
             {
+                saveCurrentMaskToView();
                 _currentFrame = frameSlider.value;
                 rebuildBaseBitmap();
+                if (!_applyMaskToAll)
+                    restoreMaskForView();
+                updateMaskOverlay();
+                updatePreview();
             }
 
             private function onScaleChange(scale:Number):void
@@ -724,7 +1024,10 @@ THE SOFTWARE.
 
                 _useMask = false;
                 enableMaskCheckBox.selected = false;
-                clearMask();
+                if (_maskBitmap)
+                    _maskBitmap.fillRect(_maskBitmap.rect, 0x00000000);
+                clearMaskHistory();
+                updateMaskOverlay();
 
                 updatePreview();
             }
@@ -752,6 +1055,7 @@ THE SOFTWARE.
 
             private function handleReplaceCurrent():void
             {
+                saveCurrentMaskToView();
                 var recolored:ThingData = getRecoloredThingData();
                 if (onSave != null)
                 {
@@ -762,6 +1066,7 @@ THE SOFTWARE.
 
             private function handleCreateNew():void
             {
+                saveCurrentMaskToView();
                 var recolored:ThingData = getRecoloredThingData();
                 if (onSave != null)
                 {
@@ -866,6 +1171,18 @@ THE SOFTWARE.
 
                     <s:Spacer width="100%"/>
 
+                    <s:Button id="undoMaskBtn"
+                        label="@Resource(key='undoMask', bundle='strings')"
+                        toolTip="Ctrl+Z"
+                        height="20"
+                        enabled="{_canUndoMask}"
+                        click="undoMask()"/>
+                    <s:Button id="redoMaskBtn"
+                        label="@Resource(key='redoMask', bundle='strings')"
+                        toolTip="Ctrl+Y"
+                        height="20"
+                        enabled="{_canRedoMask}"
+                        click="redoMask()"/>
                     <s:Button id="selectAllBtn"
                         label="@Resource(key='selectAllMask', bundle='strings')"
                         height="20"
@@ -929,8 +1246,30 @@ THE SOFTWARE.
                         color="0xCCCCCC"
                         change="{_applyMaskToAll = applyAllFramesCheckBox.selected}"/>
                 </s:HGroup>
-                <s:Label text="Marque com o pincel ou varinha mágica apenas a bainha da espada, a capa ou a camisa para recolorir somente essa parte."
-                    color="0x90CAF9" fontSize="10"/>
+                <s:HGroup width="100%" verticalAlign="middle" gap="8">
+                    <s:Button id="copyMaskAllBtn"
+                        label="@Resource(key='copyMaskAllFrames', bundle='strings')"
+                        height="22"
+                        click="copyMaskToAllViews()"/>
+                    <s:Label text="@Resource(key='recolorAppliesAllFrames', bundle='strings')"
+                        color="0x90CAF9" fontSize="10" width="100%"/>
+                </s:HGroup>
+            </s:BorderContainer>
+
+            <!-- Color Presets -->
+            <s:BorderContainer width="100%" backgroundColor="0x2E2E2E" borderColor="0x222222" cornerRadius="4">
+                <s:layout>
+                    <s:VerticalLayout paddingLeft="10" paddingRight="10" paddingTop="8" paddingBottom="8" gap="6"/>
+                </s:layout>
+                <s:Label text="@Resource(key='colorPresets', bundle='strings')" fontWeight="bold" color="0xFFFFFF"/>
+                <s:HGroup width="100%" gap="6">
+                    <s:Button label="@Resource(key='presetShiny', bundle='strings')" height="24" click="applyPreset('shiny')"/>
+                    <s:Button label="@Resource(key='presetFire', bundle='strings')" height="24" click="applyPreset('fire')"/>
+                    <s:Button label="@Resource(key='presetIce', bundle='strings')" height="24" click="applyPreset('ice')"/>
+                    <s:Button label="@Resource(key='presetPoison', bundle='strings')" height="24" click="applyPreset('poison')"/>
+                    <s:Button label="@Resource(key='presetShadow', bundle='strings')" height="24" click="applyPreset('shadow')"/>
+                    <s:Button label="@Resource(key='presetBlood', bundle='strings')" height="24" click="applyPreset('blood')"/>
+                </s:HGroup>
             </s:BorderContainer>
 
             <!-- Section 1: Matiz e Saturação (HSL) -->
@@ -1023,6 +1362,12 @@ THE SOFTWARE.
                         width="65"
                         maxChars="6"
                         change="onSourceHexChange()"/>
+                </s:HGroup>
+
+                <!-- Eyedropper color history -->
+                <s:HGroup width="100%" verticalAlign="middle" gap="6" enabled="{enableReplaceCheckBox.selected}">
+                    <s:Label text="@Resource(key='colorHistory', bundle='strings')" width="100" color="0xDDDDDD"/>
+                    <s:HGroup id="colorHistoryGroup" gap="4" verticalAlign="middle"/>
                 </s:HGroup>
 
                 <!-- Target Color Row -->
