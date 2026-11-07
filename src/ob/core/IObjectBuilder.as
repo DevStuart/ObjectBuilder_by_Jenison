@@ -104,6 +104,7 @@ package ob.core
         function copyPatternsToClipboard(thing:ThingType):void;
         function pastePatternsFromClipboard(targets:Vector.<ThingType>):void;
         function exportSpriteList(sprites:Vector.<SpriteData>):void;
+        function replaceSpritesFromFiles(list:Vector.<PathHelper>):void;
         function sendCommand(command:WorkerCommand):void;
 
         function populateFoundTab(items:Vector.<ThingListItem>):void;

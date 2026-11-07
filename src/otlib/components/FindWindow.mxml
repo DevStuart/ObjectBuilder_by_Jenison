@@ -99,7 +99,6 @@ THE SOFTWARE.
             import ob.commands.things.SetThingDataCommand;
             import ob.commands.things.UpdateThingPropertiesCommand;
             import ob.commands.things.UpdateThingCommand;
-            import ob.commands.sprites.ReplaceSpritesCommand;
             import ob.commands.sprites.ExportSpritesCommand;
             
             import otlib.events.ThingListEvent;
@@ -863,7 +862,48 @@ THE SOFTWARE.
             
             protected function replaceSpriteHandler(event:SpriteListEvent):void
             {
-                // TODO: Implement replace sprite logic
+                if (!m_application || !m_application.clientLoaded)
+                    return;
+            
+                var selectedIds:Vector.<uint> = spritesList.selectedIds;
+                if (!selectedIds || selectedIds.length == 0)
+                    return;
+            
+                var filters:Array = OtlibUtils.createImagesFileFilter();
+                var file:File = m_application.settings.getIODirectory() || File.userDirectory;
+                file.addEventListener(FileListEvent.SELECT_MULTIPLE, multipleSelectHandler);
+                file.browseForOpenMultiple(resourceManager.getString("strings", "selectImages"), filters);
+            
+                function multipleSelectHandler(event:FileListEvent):void
+                {
+                    var files:Array = event.files;
+                    var length:uint = files.length;
+                    var list:Vector.<PathHelper> = new Vector.<PathHelper>(length, true);
+            
+                    if (length > 0)
+                        m_application.settings.setIODirectory(files[0]);
+            
+                    if (selectedIds.length != files.length)
+                    {
+                        Alert.show(
+                                resourceManager.getString(
+                                    "strings",
+                                    "invalidFileAmount",
+                                    [resourceManager.getString("strings", "sprites").toLowerCase()]),
+                                resourceManager.getString("strings", "error"));
+                        return;
+                    }
+            
+                    OtlibUtils.sortFiles(files, Array.NUMERIC | Array.DESCENDING);
+            
+                    for (var i:uint = 0; i < length; i++)
+                    {
+                        list[i] = new PathHelper(files[i].nativePath, selectedIds[i]);
+                    }
+            
+                    if (list.length != 0)
+                        m_application.replaceSpritesFromFiles(list);
+                }
             }
             
             protected function closingHandler(event:Event):void
@@ -1452,7 +1492,7 @@ THE SOFTWARE.
                     verticalScrollPolicy="on"
                     doubleClickEnabled="true"
                     allowMultipleSelection="true"
-                    contextMenuEnabled="false"
+                    contextMenuEnabled="true"
                     requireSelection="true"
                     doubleClick="doubleClickHandler(event)"
                     remove="removeSpriteHandler(event)"

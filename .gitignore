@@ -21,3 +21,12 @@ workerswfs/
 # Server scripts backup
 _server_vps_scripts_backup/
 dist/
+
+# Graphify + Obsidian (local only — do not push to GitHub)
+.cursor/
+graphify-out/
+.obsidian/
+.graphifyrc
+.graphifyignore
+.gitignore_global
+.gitignore

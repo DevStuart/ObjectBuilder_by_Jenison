@@ -1,3 +1,9 @@
+### Unreleased
+
+Bug Fixes:
+
+* Implemented replace sprite from the Find window results (was a no-op TODO). Enabled the sprites context menu so Replace and Export work there.
+
 ### 0.6.0
 
 Features:
