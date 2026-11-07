@@ -902,11 +902,16 @@ THE SOFTWARE.
                         return;
                     }
             
+                    // Sort both by numeric id so filename ids (e.g. sprite_15.png) pair with sprite 15.
+                    var ids:Array = [];
+                    for (var j:uint = 0; j < selectedIds.length; j++)
+                        ids[j] = selectedIds[j];
+                    ids.sort(Array.NUMERIC | Array.DESCENDING);
                     OtlibUtils.sortFiles(files, Array.NUMERIC | Array.DESCENDING);
             
                     for (var i:uint = 0; i < length; i++)
                     {
-                        list[i] = new PathHelper(files[i].nativePath, selectedIds[i]);
+                        list[i] = new PathHelper(files[i].nativePath, uint(ids[i]));
                     }
             
                     if (list.length != 0)
