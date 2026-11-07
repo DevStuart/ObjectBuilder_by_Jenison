@@ -12,15 +12,20 @@ O **Object Builder** é um editor visual completo para criação e edição de o
   * Ajuste de Matiz (Hue), Saturação e Luminosidade em tempo real.
   * Modo Colorir (Colorize) para efeitos monocromáticos ou elementais.
   * Substituição Seletiva de Cores com Conta-Gotas, tolerância ajustável e preservação de luz e sombra.
+  * **Presets de Cor**: Shiny, Fogo, Gelo, Veneno, Sombra e Sangue com 1 clique.
+  * **Histórico de Cores**: Cores recentes do conta-gotas para reutilizar na substituição.
 * 🪄 **Máscara e Seleção de Área (Recolorir Parcial)**:
   * **Varinha Mágica**: Com apenas 1 clique, seleciona toda a parte conectada (ex: mudar só a bainha da espada, a capa ou a camisa de um outfit).
   * **Pincel (1px a 4px)**: Pinte livremente as áreas que deseja modificar.
   * **Borracha**: Apague e desmarque pixels da seleção.
   * **Retângulo de Seleção**: Selecione regiões quadradas ou retangulares com facilidade.
   * **Destaque Visual (Overlay)**: Visualização em tempo real dos pixels selecionados com opção de ligar/desligar.
+  * **Undo/Redo da Máscara**: Desfazer e refazer a seleção (botões ou `Ctrl+Z` / `Ctrl+Y`).
+  * **Máscara por Frame/Direção**: Persistência da seleção ao trocar frames e direções, com opção de copiar a máscara para todos.
 * 💾 **Opções Inteligentes de Salvamento**:
   * **Criar Novo**: Duplica o objeto gerando novo ID e novas sprites (ideal para Shinies e novos itens).
   * **Substituir Atual**: Atualiza as sprites do objeto existente sem alterar seu ID.
+  * Ao salvar, o recolor é aplicado no **objeto inteiro** (todos os frames e direções).
 
 ---
 
@@ -40,6 +45,8 @@ O **Object Builder** é um editor visual completo para criação e edição de o
 * **Editar Pixels (Edit Pixels)**: Desloque e centralize os pixels do sprite com proteção inteligente de bordas.
 * **Visualização em Rolo de Filme (Film Roll)**: Navegação prática quadro a quadro das animações.
 * **Grade de Pixels (Pixel Grid)**: Grade para edições cirúrgicas e precisas.
+* **Find → Replace de Sprites**: Substitua sprites diretamente pelos resultados da busca (arquivo ou clipboard).
+* **Copy/Paste de Sprites na Find**: Copie uma sprite e cole para substituir outra selecionada.
 
 ---
 
@@ -75,6 +82,7 @@ Se este projeto te ajudou e você deseja apoiar o desenvolvimento contínuo de n
 ## Créditos
 
 * **Jenison**: Desenvolvimento e implementação da ferramenta de Recolorir Inteligente, Seleção de Área (Varinha Mágica, Pincel, Borracha, Retângulo), salvamento Criar Novo/Substituir, metadados e empacotamento.
+* **DevStuart**: Undo/Redo da máscara, presets e histórico de cores no Recolor, Replace/Copy/Paste de sprites na Find.
 * **punkice3407**: Manutenção da base do repositório Open Source.
 * **Edubart & Mignari**: Autores originais do projeto ObjectBuilder / OTTools.
 * **Comunidade OTServ**: Pelo feedback e apoio ao desenvolvimento de ferramentas abertas.
